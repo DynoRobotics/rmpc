@@ -1,6 +1,23 @@
+use std::array::from_fn;
 use std::fmt::Debug;
 
-use crate::math::Linear;
+use crate::math::{Linear, Matrix, Vector};
+
+/// Linearizes the function around a certain point, returning the value and
+/// Jacobian at that point.
+pub fn linearize<const I: usize, const O: usize>(
+    point: Vector<I>,
+    function: impl FnOnce([Dual<Vector<I>>; I]) -> [Dual<Vector<I>>; O],
+) -> (Vector<O>, Matrix<O, I>) {
+    let input = from_fn(|i| Dual {
+        value: point.0[i],
+        grad: Vector(from_fn(|j| if i == j { 1.0 } else { 0.0 })),
+    });
+    let output = function(input);
+    let value = Vector(output.map(|out| out.value));
+    let jacobian = Matrix(output.map(|out| out.grad.0));
+    (value, jacobian)
+}
 
 /// A value tracking its gradient with respect to some set of variables.
 #[derive(Clone, Copy)]
