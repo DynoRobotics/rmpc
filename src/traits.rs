@@ -18,7 +18,7 @@ pub use mpc_derive::{AsVector, FieldNames};
 /// assert_eq!(Point::from_vector([3, 1, 4]), Point { x: 3, y: 1, z: 4 });
 /// assert_eq!(Point { x: 2, y: 7, z: 1 }.into_vector(), [2, 7, 1]);
 /// ```
-pub trait AsVector<const N: usize> {
+pub trait AsVector<const N: usize>: Sized {
     /// The type of the fields.
     type Item;
 
@@ -29,6 +29,16 @@ pub trait AsVector<const N: usize> {
     /// Constructs an instance of `Self` from the specified field values, in the
     /// order the fields are defined,
     fn from_vector(vector: [Self::Item; N]) -> Self;
+
+    /// Maps each field using the function.
+    ///
+    /// Note: This is only intended to be used between the same generic struct, but
+    /// enforcing that restriction isn't possible with the type system. The number
+    /// of fields however is enforced, which should be enough to prevent accidental
+    /// misuse in most cases.
+    fn map<V: AsVector<N>>(self, f: impl FnMut(Self::Item) -> V::Item) -> V {
+        V::from_vector(self.into_vector().map(f))
+    }
 }
 
 impl<T, const N: usize> AsVector<N> for [T; N] {
