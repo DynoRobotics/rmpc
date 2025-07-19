@@ -1,3 +1,5 @@
+//! Various mathematical types, traits and utilities.
+
 mod dual;
 mod matrix;
 mod traits;

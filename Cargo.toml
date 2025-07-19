@@ -1,4 +1,10 @@
+[workspace]
+members = ["mpc_derive"]
+
 [package]
 name = "mpc"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+mpc_derive.path = "mpc_derive"
