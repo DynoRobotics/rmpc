@@ -1,6 +1,8 @@
 use std::array::from_fn;
 use std::iter::zip;
-use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use std::ops::{
+    Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign,
+};
 
 use crate::math::{Linear, Vector};
 
@@ -11,7 +13,7 @@ pub struct Matrix<const R: usize, const C: usize>(pub [[f64; C]; R]);
 impl<const R: usize, const C: usize> Matrix<R, C> {
     /// The transpose of `self`.
     pub fn transpose(self) -> Matrix<C, R> {
-        Matrix(from_fn(|row| from_fn(|col| self.0[col][row])))
+        Matrix(from_fn(|row| from_fn(|col| self[(col, row)])))
     }
 
     /// The `i`th row of `self`.
@@ -22,6 +24,22 @@ impl<const R: usize, const C: usize> Matrix<R, C> {
     /// The `i`th row of `self`.
     pub fn col(self, i: usize) -> Vector<R> {
         Vector(self.0.map(|row| row[i]))
+    }
+}
+
+impl<const N: usize> Matrix<N, N> {
+    /// The identity matrix.
+    pub const IDENTITY: Self = Self::from_diag([1.0; N]);
+
+    /// A matrix with values on the main diagonals and zeros everywhere else.
+    pub const fn from_diag(diag: [f64; N]) -> Self {
+        let mut data = [[0.0; N]; N];
+        let mut i = 0;
+        while i < N {
+            data[i][i] = diag[i];
+            i += 1;
+        }
+        Matrix(data)
     }
 }
 
@@ -156,4 +174,18 @@ impl<const R: usize, const C: usize> DivAssign<f64> for Matrix<R, C> {
 
 impl<const R: usize, const C: usize> Linear for Matrix<R, C> {
     const ZERO: Self = Matrix([[0.0; C]; R]);
+}
+
+impl<const R: usize, const C: usize> Index<(usize, usize)> for Matrix<R, C> {
+    type Output = f64;
+
+    fn index(&self, index: (usize, usize)) -> &f64 {
+        &self.0[index.0][index.1]
+    }
+}
+
+impl<const R: usize, const C: usize> IndexMut<(usize, usize)> for Matrix<R, C> {
+    fn index_mut(&mut self, index: (usize, usize)) -> &mut f64 {
+        &mut self.0[index.0][index.1]
+    }
 }

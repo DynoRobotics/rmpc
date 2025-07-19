@@ -1,10 +1,12 @@
 //! Various mathematical types, traits and utilities.
 
+mod algorithm;
 mod dual;
 mod matrix;
 mod traits;
 mod vector;
 
+pub use self::algorithm::inv_no_pivot;
 pub use self::dual::{Dual, linearize};
 pub use self::matrix::Matrix;
 pub use self::traits::{Linear, Zero};
