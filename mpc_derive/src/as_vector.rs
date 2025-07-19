@@ -56,10 +56,13 @@ pub fn handle_as_vector(input: DeriveInput) -> Result<TokenStream> {
     let wher = &input.generics.where_clause;
 
     Ok(quote! {
-        impl #gen_defs ::mpc::AsVector<#ty, #length> for #name <#(#gen_args),*> #wher {
+        impl #gen_defs ::mpc::AsVector<#length> for #name <#(#gen_args),*> #wher {
+            type Item = #ty;
+
             fn into_vector(self) -> [#ty; #length] {
                 [#(self.#field_names),*]
             }
+
             fn from_vector(vector: [#ty; #length]) -> Self {
                 let [#(#var_names),*] = vector;
                 Self { #(#field_names: #var_names),* }
