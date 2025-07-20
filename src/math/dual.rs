@@ -1,17 +1,17 @@
-use std::array::from_fn;
 use std::fmt::Debug;
 
 use crate::math::{Linear, Matrix, Vector};
+use crate::{Array, ArrayInst, GenArray};
 
 /// Linearizes the function around a certain point, returning the value and
 /// Jacobian at that point.
-pub fn linearize<const I: usize, const O: usize>(
+pub fn linearize<I: GenArray, O: GenArray>(
     point: Vector<I>,
-    function: impl FnOnce([Dual<Vector<I>>; I]) -> [Dual<Vector<I>>; O],
+    function: impl FnOnce(Array<I, Dual<Vector<I>>>) -> Array<O, Dual<Vector<I>>>,
 ) -> (Vector<O>, Matrix<O, I>) {
-    let input = from_fn(|i| Dual {
-        value: point.0[i],
-        grad: Vector(from_fn(|j| if i == j { 1.0 } else { 0.0 })),
+    let input = I::from_fn(|i| Dual {
+        value: point[i],
+        grad: Vector(I::from_fn(|j| if i == j { 1.0 } else { 0.0 })),
     });
     let output = function(input);
     let value = Vector(output.map(|out| out.value));
@@ -20,7 +20,7 @@ pub fn linearize<const I: usize, const O: usize>(
 }
 
 /// A value tracking its gradient with respect to some set of variables.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Dual<D> {
     value: f64,
     grad: D,
@@ -34,15 +34,6 @@ impl<D> Dual<D> {
     /// used in calculations.
     pub fn value(self) -> f64 {
         self.value
-    }
-}
-
-impl<D: Debug> Debug for Dual<D> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Dual")
-            .field("value", &self.value)
-            .field("grad", &self.grad)
-            .finish()
     }
 }
 

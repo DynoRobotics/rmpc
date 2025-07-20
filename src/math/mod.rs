@@ -8,6 +8,6 @@ mod vector;
 
 pub use self::algorithm::inv_no_pivot;
 pub use self::dual::{Dual, linearize};
-pub use self::matrix::Matrix;
+pub use self::matrix::{Matrix, matrix};
 pub use self::traits::{Linear, Zero};
-pub use self::vector::Vector;
+pub use self::vector::{Vector, vector};

@@ -1,5 +1,7 @@
-use crate::AsVector;
+use std::iter::zip;
+
 use crate::math::{Dual, Linear, Zero};
+use crate::{Array, ArrayInst, GenArray};
 
 /// An explicit non-linear discrete time model on the form
 /// `x[k+1] = time_step(x[k], u[k])`.
@@ -9,20 +11,24 @@ use crate::math::{Dual, Linear, Zero};
 /// into a discrete time model.
 ///
 /// [`discretize`]: Continuous::discretize
-pub trait Model<const NX: usize, const NU: usize> {
-    type State<T>: AsVector<NX, Item = T>;
-    type Input<T>: AsVector<NU, Item = T>;
+pub trait Model {
+    type State: GenArray;
+    type Input: GenArray;
 
     /// Performs a single time step. Uses dual numbers to make it possible to
     /// linearize the model.
     fn time_step<D: Linear>(
         &self,
-        state: Self::State<Dual<D>>,
-        input: Self::Input<Dual<D>>,
-    ) -> Self::State<Dual<D>>;
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::State, Dual<D>>;
 
     /// A convenience method to perform the time step without tracking any gradient.
-    fn time_step_f64(&self, state: Self::State<f64>, input: Self::Input<f64>) -> Self::State<f64> {
+    fn time_step_f64(
+        &self,
+        state: Array<Self::State, f64>,
+        input: Array<Self::Input, f64>,
+    ) -> Array<Self::State, f64> {
         let state = state.map(Dual::from);
         let input = input.map(Dual::from);
         let next_state = self.time_step::<Zero>(state, input);
@@ -35,24 +41,24 @@ pub trait Model<const NX: usize, const NU: usize> {
 /// model using [`discretize`].
 ///
 /// [`discretize`]: Continuous::discretize
-pub trait Continuous<const NX: usize, const NU: usize> {
-    type State<T>: AsVector<NX, Item = T>;
-    type Input<T>: AsVector<NU, Item = T>;
+pub trait Continuous {
+    type State: GenArray;
+    type Input: GenArray;
 
     /// Gets the time derivative of the state given some input. Uses dual numbers to
     /// make it possible to linearize the model.
     fn state_deriv<D: Linear>(
         &self,
-        state: Self::State<Dual<D>>,
-        input: Self::Input<Dual<D>>,
-    ) -> Self::State<Dual<D>>;
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::State, Dual<D>>;
 
     /// A convenience method to get the derivative without tracking any gradient.
     fn state_deriv_f64(
         &self,
-        state: Self::State<f64>,
-        input: Self::Input<f64>,
-    ) -> Self::State<f64> {
+        state: Array<Self::State, f64>,
+        input: Array<Self::Input, f64>,
+    ) -> Array<Self::State, f64> {
         let state = state.map(Dual::from);
         let input = input.map(Dual::from);
         let next_state = self.state_deriv::<Zero>(state, input);
@@ -82,47 +88,35 @@ pub struct RungeKutta4<M> {
     pub delta_time: f64,
 }
 
-impl<M, const NX: usize, const NU: usize> Model<NX, NU> for RungeKutta4<M>
-where
-    M: Continuous<NX, NU>,
-{
-    type State<T> = <M as Continuous<NX, NU>>::State<T>;
-    type Input<T> = <M as Continuous<NX, NU>>::Input<T>;
+impl<M: Continuous> Model for RungeKutta4<M> {
+    type State = <M as Continuous>::State;
+    type Input = <M as Continuous>::Input;
 
     fn time_step<D: Linear>(
         &self,
-        state: Self::State<Dual<D>>,
-        input: Self::Input<Dual<D>>,
-    ) -> Self::State<Dual<D>> {
-        let state = state.into_vector();
-        let input = input.into_vector();
-
-        let state_dot = |state: [Dual<D>; NX]| {
-            self.model
-                .state_deriv(AsVector::from_vector(state), AsVector::from_vector(input))
-                .into_vector()
-        };
-
-        let perturb = |offsets: &[(f64, [Dual<D>; NX])]| -> [Dual<D>; NX] {
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::State, Dual<D>> {
+        let perturb = |offsets: &[(f64, Array<Self::State, _>)]| {
             let mut state = state;
             for &(scale, delta) in offsets {
-                for i in 0..NX {
-                    state[i] += scale * self.delta_time * delta[i];
+                for (state, &delta) in zip(state.as_mut(), delta.as_ref()) {
+                    *state += scale * self.delta_time * delta;
                 }
             }
             state
         };
 
-        let k_1 = state_dot(state);
-        let k_2 = state_dot(perturb(&[(0.5, k_1)]));
-        let k_3 = state_dot(perturb(&[(0.5, k_2)]));
-        let k_4 = state_dot(perturb(&[(1.0, k_3)]));
+        let k_1 = self.model.state_deriv(state, input);
+        let k_2 = self.model.state_deriv(perturb(&[(0.5, k_1)]), input);
+        let k_3 = self.model.state_deriv(perturb(&[(0.5, k_2)]), input);
+        let k_4 = self.model.state_deriv(perturb(&[(1.0, k_3)]), input);
 
-        AsVector::from_vector(perturb(&[
+        perturb(&[
             (1.0 / 6.0, k_1),
             (2.0 / 6.0, k_2),
             (2.0 / 6.0, k_3),
             (1.0 / 6.0, k_4),
-        ]))
+        ])
     }
 }
