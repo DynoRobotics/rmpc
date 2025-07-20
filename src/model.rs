@@ -18,6 +18,8 @@ pub trait Model {
     type State: GenArray;
     /// The input at some time step.
     type Input: GenArray;
+    /// A vector whose squared magnitude is the cost at some time step.
+    type Cost: GenArray;
 
     /// Performs a single time step. Uses dual numbers to make it possible to
     /// linearize the model.
@@ -26,6 +28,13 @@ pub trait Model {
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::State, Dual<D>>;
+
+    /// The vector whose squared magnitude is the cost at the current time step.
+    fn cost_vector<D: Linear>(
+        &self,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::Cost, Dual<D>>;
 
     /// A convenience method to perform the time step without tracking any gradient.
     fn time_step_f64(
@@ -37,6 +46,18 @@ pub trait Model {
         let input = input.map(Dual::from);
         let next_state = self.time_step::<Zero>(state, input);
         next_state.map(Dual::value)
+    }
+
+    /// A convenience method to get the cost vector without tracking any gradient.
+    fn cost_vector_f64(
+        &self,
+        state: Array<Self::State, f64>,
+        input: Array<Self::Input, f64>,
+    ) -> Array<Self::Cost, f64> {
+        let state = state.map(Dual::from);
+        let input = input.map(Dual::from);
+        let cost = self.cost_vector::<Zero>(state, input);
+        cost.map(Dual::value)
     }
 }
 
@@ -50,6 +71,8 @@ pub trait Continuous {
     type State: GenArray;
     /// The derivative of the system at some point in time.
     type Input: GenArray;
+    /// A vector whose squared magnitude is the cost density at some point in time.
+    type Cost: GenArray;
 
     /// Gets the time derivative of the state given some input. Uses dual numbers to
     /// make it possible to linearize the model.
@@ -58,6 +81,14 @@ pub trait Continuous {
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::State, Dual<D>>;
+
+    /// The vector whose squared magnitude is the cost density at the current point
+    /// in time.
+    fn cost_vector<D: Linear>(
+        &self,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::Cost, Dual<D>>;
 
     /// A convenience method to get the derivative without tracking any gradient.
     fn state_deriv_f64(
@@ -69,6 +100,19 @@ pub trait Continuous {
         let input = input.map(Dual::from);
         let next_state = self.state_deriv::<Zero>(state, input);
         next_state.map(Dual::value)
+    }
+
+    /// A convenience method to get the cost density vector without tracking any
+    /// gradient.
+    fn cost_vector_f64(
+        &self,
+        state: Array<Self::State, f64>,
+        input: Array<Self::Input, f64>,
+    ) -> Array<Self::Cost, f64> {
+        let state = state.map(Dual::from);
+        let input = input.map(Dual::from);
+        let cost = self.cost_vector::<Zero>(state, input);
+        cost.map(Dual::value)
     }
 
     /// Turns `self` into a discrete time model using RK4 with zero order hold.
@@ -97,6 +141,7 @@ pub struct RungeKutta4<M> {
 impl<M: Continuous> Model for RungeKutta4<M> {
     type State = <M as Continuous>::State;
     type Input = <M as Continuous>::Input;
+    type Cost = <M as Continuous>::Cost;
 
     fn time_step<D: Linear>(
         &self,
@@ -124,5 +169,18 @@ impl<M: Continuous> Model for RungeKutta4<M> {
             (2.0 / 6.0, k_3),
             (1.0 / 6.0, k_4),
         ])
+    }
+
+    fn cost_vector<D: Linear>(
+        &self,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::Cost, Dual<D>> {
+        // To do: Would it be beneficial to use RK4 here aswell instead of this Riemann
+        // integral style summation?
+
+        self.model
+            .cost_vector(state, input)
+            .map(|value| value * self.delta_time)
     }
 }

@@ -28,6 +28,7 @@ struct Spring {
 impl Continuous for Spring {
     type State = SpringState<()>;
     type Input = SpringInput<()>;
+    type Cost = [(); 0];
 
     fn state_deriv<D: Linear>(
         &self,
@@ -38,6 +39,14 @@ impl Continuous for Spring {
             velocity: input.force - state.position * self.spring_const / self.mass,
             position: state.velocity,
         }
+    }
+
+    fn cost_vector<D: Linear>(
+        &self,
+        _state: SpringState<Dual<D>>,
+        _input: SpringInput<Dual<D>>,
+    ) -> [Dual<D>; 0] {
+        []
     }
 }
 
