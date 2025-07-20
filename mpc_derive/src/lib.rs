@@ -1,3 +1,5 @@
+//! Derive macros for the traits in the `mpc` crate.
+
 mod field_names;
 mod gen_array;
 

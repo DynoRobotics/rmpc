@@ -49,6 +49,8 @@
 //! what makes it possible to write code that is generic over different kinds of
 //! generic arrays.
 
+#![allow(unsafe_code)]
+
 use std::mem::MaybeUninit;
 
 pub use mpc_derive::GenArray;

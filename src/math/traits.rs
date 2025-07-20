@@ -9,6 +9,7 @@ pub trait Linear:
     + Copy
     + Sized
 {
+    /// The zero vector.
     const ZERO: Self;
 }
 

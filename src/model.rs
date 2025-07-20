@@ -1,3 +1,5 @@
+//! Mathematical state-space models of systems.
+
 use std::iter::zip;
 
 use crate::math::{Dual, Linear, Zero};
@@ -12,7 +14,9 @@ use crate::{Array, ArrayInst, GenArray};
 ///
 /// [`discretize`]: Continuous::discretize
 pub trait Model {
+    /// The state of the system at some time step.
     type State: GenArray;
+    /// The input at some time step.
     type Input: GenArray;
 
     /// Performs a single time step. Uses dual numbers to make it possible to
@@ -42,7 +46,9 @@ pub trait Model {
 ///
 /// [`discretize`]: Continuous::discretize
 pub trait Continuous {
+    /// The state of the system at some point in time.
     type State: GenArray;
+    /// The derivative of the system at some point in time.
     type Input: GenArray;
 
     /// Gets the time derivative of the state given some input. Uses dual numbers to
@@ -65,7 +71,7 @@ pub trait Continuous {
         next_state.map(Dual::value)
     }
 
-    /// Turns `self` into a discrete time model.
+    /// Turns `self` into a discrete time model using RK4 with zero order hold.
     fn discretize(self, delta_time: f64) -> RungeKutta4<Self>
     where
         Self: Sized,
