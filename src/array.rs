@@ -202,7 +202,7 @@ unsafe impl<T: Copy, const N: usize> ArrayInst for [T; N] {
 /// The concatenation of two arrays. See [`ArrayInst::concat`].
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct Concat<A, B>(A, B);
+pub struct Concat<A, B>(pub A, pub B);
 
 impl<A: GenArray, B: GenArray> GenArray for Concat<A, B> {
     type Arr<T: Copy> = Concat<A::Arr<T>, B::Arr<T>>;

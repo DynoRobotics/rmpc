@@ -94,7 +94,25 @@ impl Plot {
         writeln!(stdin, "set xr[0:{max_t}]")?;
 
         for series in self.series {
+            let min = *series
+                .values
+                .iter()
+                .filter(|v| v.is_finite())
+                .min_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap_or(&0.0);
+            let max = *series
+                .values
+                .iter()
+                .filter(|v| v.is_finite())
+                .max_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap_or(&0.0);
+
+            let margin = if min != max { 0.1 * (max - min) } else { 0.001 };
+
+            writeln!(stdin, "set yr[{}:{}]", min - margin, max + margin)?;
+
             writeln!(stdin, "$DATA << END")?;
+
             for (i, data) in series.values.into_iter().enumerate() {
                 match series.kind {
                     PlotType::Lines => writeln!(stdin, "{} {}", i as f64 * self.dt, data)?,

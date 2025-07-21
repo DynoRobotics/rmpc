@@ -3,6 +3,7 @@ use std::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign,
 };
 
+use crate::array::Concat;
 use crate::math::Linear;
 use crate::{Array, ArrayInst, GenArray, array};
 
@@ -14,6 +15,20 @@ pub struct Vector<A: GenArray>(pub Array<A, f64>);
 /// argument type.
 pub fn vector<A: ArrayInst<Item = f64>>(elements: A) -> Vector<A::Gen> {
     Vector(elements)
+}
+
+impl<A: GenArray> Vector<A> {
+    /// Concatenates `self` with another vector.
+    pub fn concat<B: GenArray>(self, other: Vector<B>) -> Vector<Concat<A, B>> {
+        Vector(self.0.concat(other.0))
+    }
+}
+
+impl<A: GenArray, B: GenArray> Vector<Concat<A, B>> {
+    /// Splits `self` into two vectors.
+    pub fn split(self) -> (Vector<A>, Vector<B>) {
+        (Vector(self.0.0), Vector(self.0.1))
+    }
 }
 
 impl<A: GenArray> Copy for Vector<A> {}

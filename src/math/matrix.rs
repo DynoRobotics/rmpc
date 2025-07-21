@@ -3,6 +3,7 @@ use std::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign,
 };
 
+use crate::array::Concat;
 use crate::math::{Linear, Vector};
 use crate::{Array, ArrayInst, GenArray, array};
 
@@ -14,6 +15,66 @@ pub struct Matrix<R: GenArray, C: GenArray>(pub Array<R, Array<C, f64>>);
 /// argument type.
 pub fn matrix<R: ArrayInst<Item = C>, C: ArrayInst<Item = f64>>(rows: R) -> Matrix<R::Gen, C::Gen> {
     Matrix(rows)
+}
+
+impl<R: GenArray, C: GenArray> Matrix<R, C> {
+    /// The transpose of `self`.
+    pub fn transpose(self) -> Matrix<C, R> {
+        Matrix(C::from_fn(|row| R::from_fn(|col| self[(col, row)])))
+    }
+
+    /// The `i`th row of `self`.
+    pub fn row(self, r: usize) -> Vector<C> {
+        Vector(self.0.as_ref()[r])
+    }
+
+    /// The `i`th column of `self`.
+    pub fn col(self, j: usize) -> Vector<R> {
+        Vector(self.0.map(|row| row.as_ref()[j]))
+    }
+
+    /// Sets the `i`th row of `self`.
+    pub fn set_row(&mut self, r: usize, row: Vector<C>) {
+        for (c, &value) in row.0.as_ref().iter().enumerate() {
+            self[(r, c)] = value;
+        }
+    }
+
+    /// Sets the `i`th column of `self`.
+    pub fn set_col(&mut self, c: usize, col: Vector<R>) {
+        for (r, &value) in col.0.as_ref().iter().enumerate() {
+            self[(r, c)] = value;
+        }
+    }
+
+    /// Concatenates `self` with another matrix, horizontally.
+    pub fn concat_h<D: GenArray>(self, other: Matrix<R, D>) -> Matrix<R, Concat<C, D>> {
+        Matrix(array::from_fn(|i| {
+            self.0.as_ref()[i].concat(other.0.as_ref()[i])
+        }))
+    }
+
+    /// Concatenates `self` with another matrix, vertically.
+    pub fn concat_v<S: GenArray>(self, other: Matrix<S, C>) -> Matrix<Concat<R, S>, C> {
+        Matrix(self.0.concat(other.0))
+    }
+}
+
+impl<R: GenArray, C: GenArray, D: GenArray> Matrix<R, Concat<C, D>> {
+    /// Splits `self` into two matrices, horizontally.
+    pub fn split_h(self) -> (Matrix<R, C>, Matrix<R, D>) {
+        (
+            Matrix(array::from_fn(|i| self.0.as_ref()[i].0)),
+            Matrix(array::from_fn(|i| self.0.as_ref()[i].1)),
+        )
+    }
+}
+
+impl<R: GenArray, S: GenArray, C: GenArray> Matrix<Concat<R, S>, C> {
+    /// Splits `self` into two matrices, vertically.
+    pub fn split_v(self) -> (Matrix<R, C>, Matrix<S, C>) {
+        (Matrix(self.0.0), Matrix(self.0.1))
+    }
 }
 
 impl<R: GenArray, C: GenArray> Copy for Matrix<R, C> {}
@@ -29,23 +90,6 @@ impl<R: GenArray, C: GenArray> std::fmt::Debug for Matrix<R, C> {
         f.debug_list()
             .entries(self.0.as_ref().iter().map(|arr| arr.as_ref()))
             .finish()
-    }
-}
-
-impl<R: GenArray, C: GenArray> Matrix<R, C> {
-    /// The transpose of `self`.
-    pub fn transpose(self) -> Matrix<C, R> {
-        Matrix(C::from_fn(|row| R::from_fn(|col| self[(col, row)])))
-    }
-
-    /// The `i`th row of `self`.
-    pub fn row(self, i: usize) -> Vector<C> {
-        Vector(self.0.as_ref()[i])
-    }
-
-    /// The `i`th row of `self`.
-    pub fn col(self, i: usize) -> Vector<R> {
-        Vector(self.0.map(|row| row.as_ref()[i]))
     }
 }
 

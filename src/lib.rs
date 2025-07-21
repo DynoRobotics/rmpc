@@ -3,6 +3,7 @@
 pub mod array;
 pub mod math;
 pub mod model;
+pub mod mpc;
 mod traits;
 pub mod utility;
 

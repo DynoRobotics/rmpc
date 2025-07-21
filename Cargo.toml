@@ -16,3 +16,6 @@ workspace = true
 
 [dependencies]
 mpc_derive.path = "mpc_derive"
+
+[profile.dev]
+opt-level = 1
