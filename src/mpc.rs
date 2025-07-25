@@ -194,31 +194,34 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             // The free inputs and dual variables at the current time step.
             let mut mod_input = mod_feedback_mat[time_i] * state + mod_feedback_vec[time_i];
 
-            // Revert the input vector to use known inputs instead of dual variables.
+            // Check all the constraints while replacing the dual
             for (input_i, bound) in self.bounds[time_i].as_ref().iter().enumerate() {
                 if let Some(bound) = bound {
-                    // See if the dual is binding in the wrong direction.
+                    // See if the dual is binding in the wrong direction, and if so, by how much.
                     let dual = mod_input[input_i];
                     let priority = dual;
                     if dual > 0.0 && priority > to_change.0 {
                         to_change = (priority, time_i, input_i, None);
                     }
 
+                    // Replace the dual variable with the actual input.
                     mod_input[input_i] = match bound {
                         Bound::Lower => self.lower[input_i],
                         Bound::Upper => self.upper[input_i],
                     };
                 } else {
-                    // Find the maximum step towards the found input
-                    let (max_step_size, bound) = if mod_input[input_i] > 0.0 {
-                        (self.upper[input_i] / mod_input[input_i], Bound::Upper)
+                    // See if we are outside the input bounds, and if so, by how much.
+                    let (near, far, bound) = if mod_input[input_i] > self.upper[input_i] {
+                        (self.upper[input_i], self.lower[input_i], Bound::Upper)
+                    } else if mod_input[input_i] < self.lower[input_i] {
+                        (self.lower[input_i], self.upper[input_i], Bound::Lower)
                     } else {
-                        (self.lower[input_i] / mod_input[input_i], Bound::Lower)
+                        continue;
                     };
+                    let relative_distance = (mod_input[input_i] - near) / (near - far);
 
-                    // See if we can make the full step towards that input or if we hit a constraint.
-                    let priority = -max_step_size;
-                    if max_step_size.is_finite() && max_step_size < 1.0 && priority > to_change.0 {
+                    let priority = -1.0 / relative_distance;
+                    if priority > to_change.0 {
                         to_change = (priority, time_i, input_i, Some(bound));
                     }
                 }
