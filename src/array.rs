@@ -117,12 +117,16 @@ pub unsafe trait ArrayInst: Copy {
     }
 
     /// Maps the elements, producing an instance with a different field type.
-    fn map<U: Copy>(self, mut f: impl FnMut(Self::Item) -> U) -> Array<Self::Gen, U> {
-        let items = self.as_ref();
-        Self::Gen::from_fn(|i| f(items[i]))
+    fn map<T: Copy>(self, mut f: impl FnMut(Self::Item) -> T) -> Array<Self::Gen, T> {
+        from_fn(|i| f(self.as_ref()[i]))
     }
 
-    /// Concatenates `self` with another array the has the same field type.
+    /// Zips `self` with another array that may have a different field type.
+    fn zip<T: Copy>(self, other: Array<Self::Gen, T>) -> Array<Self::Gen, (Self::Item, T)> {
+        from_fn(|i| (self.as_ref()[i], other.as_ref()[i]))
+    }
+
+    /// Concatenates `self` with another array that has the same field type.
     fn concat<A>(self, other: A) -> Concat<Self, A>
     where
         A: ArrayInst<Item = Self::Item>,
