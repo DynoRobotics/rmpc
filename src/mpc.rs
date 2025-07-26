@@ -2,7 +2,7 @@
 
 use std::marker::PhantomData;
 
-use crate::array::{ArrayInst, Concat, repeat};
+use crate::array::{ArrayInst, Concat, from_fn, repeat};
 use crate::math::{self, Dual, Linear, Matrix, Vector, inv_no_pivot};
 use crate::model::Model;
 use crate::{Array, GenArray};
@@ -90,11 +90,16 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         }
     }
 
-    /// Performs a single QP iteration.
-    pub fn iterate(
-        &mut self,
-        initial_state: Array<M::State, f64>,
-    ) -> (bool, [Array<M::Input, f64>; N]) {
+    /// Shifts the input constraints by a certain number of time steps, reducing the
+    /// amount of iterations needed when computing the next time step.
+    pub fn shift(&mut self, steps: usize) {
+        self.bounds[..steps].fill(repeat(None));
+        self.bounds.rotate_left(steps);
+    }
+
+    /// Performs a single QP iteration. Returns `true` or `false` depending on if
+    /// convergence has been reached, along with the input.
+    pub fn iterate(&mut self, initial_state: Array<M::State, f64>) -> (bool, Array<M::Input, f64>) {
         assert!(N > 0, "needs at least one time step before the horizon");
 
         // At each point in time we have a vector `mod_input` consisting of the input
@@ -183,7 +188,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         // With the optimal feedback known, we can find the actual trajectory and see
         // which inputs should be activated or deactivated.
         let mut state = Vector(initial_state);
-        let mut inputs = [Vector::ZERO; N];
+        let mut first_input = None;
 
         // We want to find the constrained input with the largest positive dual variable
         // if there is one, or the unconstrained input farthest outside its bounds
@@ -228,24 +233,24 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             }
 
             // Continue the trajectory using this input.
-            inputs[time_i] = mod_input;
-
             state = self.model.state_step * state
                 + self.model.input_step * mod_input
                 + self.model.const_step;
+
+            if time_i == 0 {
+                first_input = Some(from_fn(|i| {
+                    mod_input[i].clamp(self.lower[i], self.upper[i])
+                }));
+            }
         }
 
         // If we found a problem, the solution is suboptimal and we need to activate or
         // deactivate a constraint to resolve it.
         let optimal = to_change.0.is_infinite();
         if !optimal {
-            println!(
-                "changing {} {} to {:?}",
-                to_change.1, to_change.2, to_change.3
-            );
             self.bounds[to_change.1].as_mut()[to_change.2] = to_change.3;
         }
 
-        (optimal, inputs.map(|Vector(input)| input))
+        (optimal, first_input.unwrap())
     }
 }
