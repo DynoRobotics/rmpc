@@ -2,60 +2,10 @@
 
 use std::marker::PhantomData;
 
+use crate::Array;
 use crate::array::{ArrayInst, Concat, from_fn, repeat};
-use crate::math::{self, Dual, Linear, Matrix, Vector, inv_no_pivot, vector};
+use crate::math::{Linear, Matrix, Vector, eval_linearized, inv_no_pivot, linearize, vector};
 use crate::model::Model;
-use crate::{Array, GenArray};
-
-/// A linearized version of a model around some state and input.
-struct Linearized<M: Model> {
-    state_step: Matrix<M::State, M::State>,
-    input_step: Matrix<M::State, M::Input>,
-    const_step: Vector<M::State>,
-    state_cost: Matrix<M::Cost, M::State>,
-    input_cost: Matrix<M::Cost, M::Input>,
-    const_cost: Vector<M::Cost>,
-    model: PhantomData<M>,
-}
-
-impl<M: Model> Linearized<M> {
-    /// Linearizes the model.
-    fn at_point(model: &M, state: Vector<M::State>, input: Vector<M::Input>) -> Self {
-        let (state_step, input_step, const_step) =
-            linearize_func(state, input, |state, input| model.time_step(state, input));
-        let (state_cost, input_cost, const_cost) =
-            linearize_func(state, input, |state, input| model.cost_vector(state, input));
-
-        Linearized {
-            state_step,
-            input_step,
-            const_step,
-            state_cost,
-            input_cost,
-            const_cost,
-            model: PhantomData,
-        }
-    }
-}
-
-/// Approximates a non-linear function `f(x, u)` as `A*x + B*u + c`. Used by
-fn linearize_func<State: GenArray, Input: GenArray, Output: GenArray>(
-    state: Vector<State>,
-    input: Vector<Input>,
-    f: impl FnOnce(
-        Array<State, Dual<Vector<Concat<State, Input>>>>,
-        Array<Input, Dual<Vector<Concat<State, Input>>>>,
-    ) -> Array<Output, Dual<Vector<Concat<State, Input>>>>,
-) -> (Matrix<Output, State>, Matrix<Output, Input>, Vector<Output>) {
-    let point = state.concat(input);
-    let f = |Concat(state, input)| f(state, input);
-
-    let (value, jacobian) = math::linearize::<_, Output>(point, f);
-    let constant = value - jacobian * point;
-
-    let (jac_state, jac_input) = jacobian.split_h();
-    (jac_state, jac_input, constant)
-}
 
 /// The current state of the MPC solver.
 pub struct Mpc<M: Model, const N: usize> {
@@ -107,15 +57,6 @@ impl<M: Model, const N: usize> Mpc<M, N> {
     ) -> (bool, Array<M::Input, f64>) {
         assert!(N > 0, "needs at least one time step before the horizon");
 
-        // Linearized models at each time step
-        let models: [_; N] = std::array::from_fn(|time_i| {
-            Linearized::at_point(
-                model,
-                Vector(self.state_traj[time_i]),
-                Vector(self.input_traj[time_i]),
-            )
-        });
-
         // At each point in time we have a vector `mod_input` consisting of the input
         // value for non-constrained inputs and the dual variables for constrained
         // inputs. This vector is given by the formula
@@ -138,20 +79,29 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         let mut cost_vec = Vector::ZERO;
 
         for time_i in (0..N).rev() {
-            let model = &models[time_i];
+            let (jac_step, const_step) = linearize(
+                vector(self.state_traj[time_i].concat(self.input_traj[time_i])),
+                |Concat(state, input)| model.time_step(state, input),
+            );
+            let (jac_cost, const_cost) = linearize(
+                vector(self.state_traj[time_i].concat(self.input_traj[time_i])),
+                |Concat(state, input)| model.cost_vector(state, input),
+            );
+            let (state_step, input_step) = jac_step.split_h();
+            let (state_cost, input_cost) = jac_cost.split_h();
+
             let upper = vector(self.upper[time_i]);
             let lower = vector(self.lower[time_i]);
             let bounds = self.bounds[time_i];
 
             // Matrices used to find the optimal feedback.
-            let mut input_cost = model.input_step.transpose() * cost_mat * model.input_step
-                + model.input_cost.transpose() * model.input_cost;
+            let mut input_cost_mat = input_step.transpose() * cost_mat * input_step
+                + input_cost.transpose() * input_cost;
 
-            let cross_cost_mat = model.input_step.transpose() * cost_mat * model.state_step
-                + model.input_cost.transpose() * model.state_cost;
-            let mut cross_cost_vec = model.input_step.transpose()
-                * (cost_mat * model.const_step + cost_vec)
-                + model.input_cost.transpose() * model.const_cost;
+            let cross_cost_mat = input_step.transpose() * cost_mat * state_step
+                + input_cost.transpose() * state_cost;
+            let mut cross_cost_vec = input_step.transpose() * (cost_mat * const_step + cost_vec)
+                + input_cost.transpose() * const_cost;
 
             // Modify the cost matrix to instead reflect the KKT conditions of the optimum
             // with some inputs constrained. This modified matrix is no longer positive
@@ -164,13 +114,13 @@ impl<M: Model, const N: usize> Mpc<M, N> {
                     None => continue,
                 };
 
-                cross_cost_vec += fixed * input_cost.col(input_i);
-                input_cost.set_col(input_i, Vector::ZERO);
-                input_cost[(input_i, input_i)] = -sign;
+                cross_cost_vec += fixed * input_cost_mat.col(input_i);
+                input_cost_mat.set_col(input_i, Vector::ZERO);
+                input_cost_mat[(input_i, input_i)] = -sign;
             }
 
             // Solve the KKT conditions to get the optimal feedback.
-            let inv_input_cost = inv_no_pivot(input_cost);
+            let inv_input_cost = inv_no_pivot(input_cost_mat);
             let mut feedback_mat = -inv_input_cost * cross_cost_mat;
             let mut feedback_vec = -inv_input_cost * cross_cost_vec;
             mod_feedback_mat[time_i] = feedback_mat;
@@ -189,10 +139,10 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             }
 
             // Find the state cost function using that feedback.
-            let closed_state_step = model.state_step + model.input_step * feedback_mat;
-            let closed_const_step = model.const_step + model.input_step * feedback_vec;
-            let closed_state_cost = model.state_cost + model.input_cost * feedback_mat;
-            let closed_const_cost = model.const_cost + model.input_cost * feedback_vec;
+            let closed_state_step = state_step + input_step * feedback_mat;
+            let closed_const_step = const_step + input_step * feedback_vec;
+            let closed_state_cost = state_cost + input_cost * feedback_mat;
+            let closed_const_cost = const_cost + input_cost * feedback_vec;
 
             (cost_mat, cost_vec) = (
                 closed_state_step.transpose() * cost_mat * closed_state_step
@@ -213,7 +163,6 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         let mut to_change = (f64::NEG_INFINITY, 0, 0, None);
 
         for time_i in 0..N {
-            let model = &models[time_i];
             let upper = vector(self.upper[time_i]);
             let lower = vector(self.lower[time_i]);
             let bounds = self.bounds[time_i];
@@ -255,7 +204,11 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             }
 
             // Continue the trajectory using this input.
-            state = model.state_step * state + model.input_step * mod_input + model.const_step;
+            state = eval_linearized(
+                vector(self.state_traj[time_i].concat(self.input_traj[time_i])),
+                state.concat(mod_input),
+                |Concat(state, input)| model.time_step(state, input),
+            );
 
             if time_i == 0 {
                 first_input = Some(from_fn(|i| mod_input[i].clamp(lower[i], upper[i])));

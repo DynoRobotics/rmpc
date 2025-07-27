@@ -76,6 +76,7 @@ pub trait GenArray {
     /// Constructs an instance from a function, similar to
     /// [`std::array::from_fn`]. In some cases the equivalend function [`from_fn`]
     /// may provide better type inference.
+    #[inline]
     fn from_fn<T: Copy>(f: impl FnMut(usize) -> T) -> Self::Arr<T> {
         from_fn(f)
     }
@@ -159,6 +160,7 @@ pub const fn repeat<A: ArrayInst>(item: A::Item) -> A {
 
 /// Equivalent to [`GenArray::from_fn`] but with a slightly different signature
 /// allowing the type inference to deduce the generic array type.
+#[inline]
 pub fn from_fn<A: ArrayInst>(mut f: impl FnMut(usize) -> A::Item) -> A {
     let mut array = MaybeUninit::<A>::uninit();
 
@@ -175,7 +177,7 @@ pub fn from_fn<A: ArrayInst>(mut f: impl FnMut(usize) -> A::Item) -> A {
 }
 
 /// A `const` version of [`ArrayInst::as_ref`].
-#[inline(always)]
+#[inline]
 pub const fn as_ref<A: ArrayInst>(array: &A) -> &[A::Item] {
     let ptr = (array as *const A).cast::<A::Item>();
     let len = A::Gen::LEN;
@@ -184,7 +186,7 @@ pub const fn as_ref<A: ArrayInst>(array: &A) -> &[A::Item] {
 }
 
 /// A `const` version of [`ArrayInst::as_mut`].
-#[inline(always)]
+#[inline]
 pub const fn as_mut<A: ArrayInst>(array: &mut A) -> &mut [A::Item] {
     let ptr = (array as *mut A).cast::<A::Item>();
     let len = A::Gen::LEN;
