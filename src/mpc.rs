@@ -3,7 +3,7 @@
 use std::marker::PhantomData;
 
 use crate::array::{ArrayInst, Concat, from_fn, repeat};
-use crate::math::{self, Dual, Linear, Matrix, Vector, inv_no_pivot};
+use crate::math::{self, Dual, Linear, Matrix, Vector, inv_no_pivot, vector};
 use crate::model::Model;
 use crate::{Array, GenArray};
 
@@ -59,10 +59,12 @@ fn linearize_func<State: GenArray, Input: GenArray, Output: GenArray>(
 
 /// The current state of the MPC solver.
 pub struct Mpc<M: Model, const N: usize> {
-    model: Linearized<M>,
+    state_traj: [Array<M::State, f64>; N],
+    input_traj: [Array<M::Input, f64>; N],
     bounds: [Array<M::Input, Option<Bound>>; N],
-    lower: Vector<M::Input>,
-    upper: Vector<M::Input>,
+    lower: [Array<M::Input, f64>; N],
+    upper: [Array<M::Input, f64>; N],
+    model: PhantomData<fn(&M)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -74,19 +76,18 @@ enum Bound {
 impl<M: Model, const N: usize> Mpc<M, N> {
     /// Initializes the MPC.
     pub fn new(
-        model: &M,
-        lin_state: Array<M::State, f64>,
-        lin_input: Array<M::Input, f64>,
-        lower: Array<M::Input, f64>,
-        upper: Array<M::Input, f64>,
+        state_traj: [Array<M::State, f64>; N],
+        input_traj: [Array<M::Input, f64>; N],
+        lower: [Array<M::Input, f64>; N],
+        upper: [Array<M::Input, f64>; N],
     ) -> Self {
-        let upper = Vector(upper);
-        let lower = Vector(lower);
         Mpc {
-            model: Linearized::at_point(model, Vector(lin_state), Vector(lin_input)),
+            state_traj,
+            input_traj,
             bounds: [repeat(None); N],
             lower,
             upper,
+            model: PhantomData,
         }
     }
 
@@ -99,8 +100,21 @@ impl<M: Model, const N: usize> Mpc<M, N> {
 
     /// Performs a single QP iteration. Returns `true` or `false` depending on if
     /// convergence has been reached, along with the input.
-    pub fn iterate(&mut self, initial_state: Array<M::State, f64>) -> (bool, Array<M::Input, f64>) {
+    pub fn iterate(
+        &mut self,
+        model: &M,
+        initial_state: Array<M::State, f64>,
+    ) -> (bool, Array<M::Input, f64>) {
         assert!(N > 0, "needs at least one time step before the horizon");
+
+        // Linearized models at each time step
+        let models: [_; N] = std::array::from_fn(|time_i| {
+            Linearized::at_point(
+                model,
+                Vector(self.state_traj[time_i]),
+                Vector(self.input_traj[time_i]),
+            )
+        });
 
         // At each point in time we have a vector `mod_input` consisting of the input
         // value for non-constrained inputs and the dual variables for constrained
@@ -124,26 +138,29 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         let mut cost_vec = Vector::ZERO;
 
         for time_i in (0..N).rev() {
-            // Matrices used to find the optimal feedback.
-            let mut input_cost =
-                self.model.input_step.transpose() * cost_mat * self.model.input_step
-                    + self.model.input_cost.transpose() * self.model.input_cost;
+            let model = &models[time_i];
+            let upper = vector(self.upper[time_i]);
+            let lower = vector(self.lower[time_i]);
+            let bounds = self.bounds[time_i];
 
-            let cross_cost_mat =
-                self.model.input_step.transpose() * cost_mat * self.model.state_step
-                    + self.model.input_cost.transpose() * self.model.state_cost;
-            let mut cross_cost_vec = self.model.input_step.transpose()
-                * (cost_mat * self.model.const_step + cost_vec)
-                + self.model.input_cost.transpose() * self.model.const_cost;
+            // Matrices used to find the optimal feedback.
+            let mut input_cost = model.input_step.transpose() * cost_mat * model.input_step
+                + model.input_cost.transpose() * model.input_cost;
+
+            let cross_cost_mat = model.input_step.transpose() * cost_mat * model.state_step
+                + model.input_cost.transpose() * model.state_cost;
+            let mut cross_cost_vec = model.input_step.transpose()
+                * (cost_mat * model.const_step + cost_vec)
+                + model.input_cost.transpose() * model.const_cost;
 
             // Modify the cost matrix to instead reflect the KKT conditions of the optimum
             // with some inputs constrained. This modified matrix is no longer positive
             // definite but It can be shown that it still meets the conditions for
             // `inv_no_pivot`.
-            for (input_i, bound) in self.bounds[time_i].as_ref().iter().enumerate() {
+            for (input_i, bound) in bounds.as_ref().iter().enumerate() {
                 let (sign, fixed) = match bound {
-                    Some(Bound::Lower) => (-1.0, self.lower[input_i]),
-                    Some(Bound::Upper) => (1.0, self.upper[input_i]),
+                    Some(Bound::Lower) => (-1.0, lower[input_i]),
+                    Some(Bound::Upper) => (1.0, upper[input_i]),
                     None => continue,
                 };
 
@@ -160,10 +177,10 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             mod_feedback_vec[time_i] = feedback_vec;
 
             // Revert the feedback to use the known inputs instead of dual variables.
-            for (input_i, bound) in self.bounds[time_i].as_ref().iter().enumerate() {
+            for (input_i, bound) in bounds.as_ref().iter().enumerate() {
                 let fixed = match bound {
-                    Some(Bound::Lower) => self.lower[input_i],
-                    Some(Bound::Upper) => self.upper[input_i],
+                    Some(Bound::Lower) => lower[input_i],
+                    Some(Bound::Upper) => upper[input_i],
                     None => continue,
                 };
 
@@ -172,10 +189,10 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             }
 
             // Find the state cost function using that feedback.
-            let closed_state_step = self.model.state_step + self.model.input_step * feedback_mat;
-            let closed_const_step = self.model.const_step + self.model.input_step * feedback_vec;
-            let closed_state_cost = self.model.state_cost + self.model.input_cost * feedback_mat;
-            let closed_const_cost = self.model.const_cost + self.model.input_cost * feedback_vec;
+            let closed_state_step = model.state_step + model.input_step * feedback_mat;
+            let closed_const_step = model.const_step + model.input_step * feedback_vec;
+            let closed_state_cost = model.state_cost + model.input_cost * feedback_mat;
+            let closed_const_cost = model.const_cost + model.input_cost * feedback_vec;
 
             (cost_mat, cost_vec) = (
                 closed_state_step.transpose() * cost_mat * closed_state_step
@@ -196,11 +213,16 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         let mut to_change = (f64::NEG_INFINITY, 0, 0, None);
 
         for time_i in 0..N {
+            let model = &models[time_i];
+            let upper = vector(self.upper[time_i]);
+            let lower = vector(self.lower[time_i]);
+            let bounds = self.bounds[time_i];
+
             // The free inputs and dual variables at the current time step.
             let mut mod_input = mod_feedback_mat[time_i] * state + mod_feedback_vec[time_i];
 
             // Check all the constraints while replacing the dual
-            for (input_i, bound) in self.bounds[time_i].as_ref().iter().enumerate() {
+            for (input_i, bound) in bounds.as_ref().iter().enumerate() {
                 if let Some(bound) = bound {
                     // See if the dual is binding in the wrong direction, and if so, by how much.
                     let dual = mod_input[input_i];
@@ -211,15 +233,15 @@ impl<M: Model, const N: usize> Mpc<M, N> {
 
                     // Replace the dual variable with the actual input.
                     mod_input[input_i] = match bound {
-                        Bound::Lower => self.lower[input_i],
-                        Bound::Upper => self.upper[input_i],
+                        Bound::Lower => lower[input_i],
+                        Bound::Upper => upper[input_i],
                     };
                 } else {
                     // See if we are outside the input bounds, and if so, by how much.
-                    let (near, far, bound) = if mod_input[input_i] > self.upper[input_i] {
-                        (self.upper[input_i], self.lower[input_i], Bound::Upper)
-                    } else if mod_input[input_i] < self.lower[input_i] {
-                        (self.lower[input_i], self.upper[input_i], Bound::Lower)
+                    let (near, far, bound) = if mod_input[input_i] > upper[input_i] {
+                        (upper[input_i], lower[input_i], Bound::Upper)
+                    } else if mod_input[input_i] < lower[input_i] {
+                        (lower[input_i], upper[input_i], Bound::Lower)
                     } else {
                         continue;
                     };
@@ -233,14 +255,10 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             }
 
             // Continue the trajectory using this input.
-            state = self.model.state_step * state
-                + self.model.input_step * mod_input
-                + self.model.const_step;
+            state = model.state_step * state + model.input_step * mod_input + model.const_step;
 
             if time_i == 0 {
-                first_input = Some(from_fn(|i| {
-                    mod_input[i].clamp(self.lower[i], self.upper[i])
-                }));
+                first_input = Some(from_fn(|i| mod_input[i].clamp(lower[i], upper[i])));
             }
         }
 
