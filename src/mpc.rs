@@ -9,18 +9,38 @@ use crate::model::Model;
 
 /// The current state of the MPC solver.
 pub struct Mpc<M: Model, const N: usize> {
-    state_traj: [Array<M::State, f64>; N],
-    input_traj: [Array<M::Input, f64>; N],
+    /// The reference trajectory of the state.
+    pub state_traj: [Array<M::State, f64>; N],
+    /// The reference trajectory of the input.
+    pub input_traj: [Array<M::Input, f64>; N],
+    /// The lower bounds of the inputs.
+    pub lower: [Array<M::Input, f64>; N],
+    /// The upper bounds of the inputs.
+    pub upper: [Array<M::Input, f64>; N],
+
+    /// The current active set.
     bounds: [Array<M::Input, Option<Bound>>; N],
-    lower: [Array<M::Input, f64>; N],
-    upper: [Array<M::Input, f64>; N],
+
     model: PhantomData<fn(&M)>,
 }
 
+/// The bound an input is currently constrained to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Bound {
     Upper,
     Lower,
+}
+
+/// Moves all items a certain number of steps towards the start of the slice.
+/// The first `steps` items are removed and `steps` copies of the last item are
+/// inserted at the end.
+fn shift_left<T: Copy>(values: &mut [T], steps: usize) {
+    if let Some(&last) = values.last() {
+        let steps = steps.min(values.len());
+        values.copy_within(steps.., 0);
+        let last_i = values.len() - steps;
+        values[last_i..].fill(last);
+    }
 }
 
 impl<M: Model, const N: usize> Mpc<M, N> {
@@ -34,18 +54,20 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         Mpc {
             state_traj,
             input_traj,
-            bounds: [repeat(None); N],
             lower,
             upper,
+            bounds: [repeat(None); N],
             model: PhantomData,
         }
     }
 
-    /// Shifts the input constraints by a certain number of time steps, reducing the
-    /// amount of iterations needed when computing the next time step.
+    /// Shifts the trajectory and constraints by a specified number of time steps.
     pub fn shift(&mut self, steps: usize) {
-        self.bounds[..steps].fill(repeat(None));
-        self.bounds.rotate_left(steps);
+        shift_left(&mut self.state_traj, steps);
+        shift_left(&mut self.input_traj, steps);
+        shift_left(&mut self.lower, steps);
+        shift_left(&mut self.upper, steps);
+        shift_left(&mut self.bounds, steps);
     }
 
     /// Performs a single QP iteration. Returns `true` or `false` depending on if
