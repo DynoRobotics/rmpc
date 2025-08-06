@@ -93,16 +93,16 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         for time_i in (0..N).rev() {
             let (jac_step, const_step) = linearize(
                 vector(self.state_traj[time_i].concat(self.input_traj[time_i])),
-                |Concat(state, input)| model.time_step(state, input),
+                |Concat(state, input)| model.time_step(time_i, state, input),
             );
             let (jac_cost, const_cost) = linearize(
                 vector(self.state_traj[time_i].concat(self.input_traj[time_i])),
-                |Concat(state, input)| model.cost_vector(state, input),
+                |Concat(state, input)| model.cost_vector(time_i, state, input),
             );
             let (state_step, input_step) = jac_step.split_h();
             let (state_cost, input_cost) = jac_cost.split_h();
 
-            let ranges = model.input_ranges();
+            let ranges = model.input_ranges(time_i);
             let upper = vector(ranges.map(|(_, upper)| upper));
             let lower = vector(ranges.map(|(lower, _)| lower));
 
@@ -177,7 +177,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         let mut to_change = (f64::NEG_INFINITY, 0, 0, None);
 
         for time_i in 0..N {
-            let ranges = model.input_ranges();
+            let ranges = model.input_ranges(time_i);
             let upper = vector(ranges.map(|(_, upper)| upper));
             let lower = vector(ranges.map(|(lower, _)| lower));
 
@@ -223,7 +223,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             state = eval_linearized(
                 vector(self.state_traj[time_i].concat(self.input_traj[time_i])),
                 state.concat(mod_input),
-                |Concat(state, input)| model.time_step(state, input),
+                |Concat(state, input)| model.time_step(time_i, state, input),
             );
 
             if time_i == 0 {

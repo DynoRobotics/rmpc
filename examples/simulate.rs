@@ -32,6 +32,7 @@ impl Continuous for Spring {
 
     fn state_deriv<D: Linear>(
         &self,
+        _time: f64,
         state: SpringState<Dual<D>>,
         input: SpringInput<Dual<D>>,
     ) -> SpringState<Dual<D>> {
@@ -43,20 +44,21 @@ impl Continuous for Spring {
 
     fn cost_vector<D: Linear>(
         &self,
+        _time: f64,
         _state: SpringState<Dual<D>>,
         _input: SpringInput<Dual<D>>,
     ) -> [Dual<D>; 0] {
         []
     }
 
-    fn input_ranges(&self) -> SpringInput<(f64, f64)> {
+    fn input_ranges(&self, _time: f64) -> SpringInput<(f64, f64)> {
         SpringInput { force: (-1.0, 1.0) }
     }
 }
 
 fn main() -> Result<()> {
     let dt = 0.1;
-    let mode = Spring {
+    let model = Spring {
         spring_const: 0.5,
         mass: 0.1,
     }
@@ -75,7 +77,7 @@ fn main() -> Result<()> {
         let input = SpringInput {
             force: (-dt * i as f64).exp(),
         };
-        state = mode.time_step_f64(state, input);
+        state = model.time_step_f64(i, state, input);
         inputs.push(input);
         states.push(state);
     }

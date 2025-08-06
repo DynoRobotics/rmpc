@@ -27,6 +27,7 @@ pub trait Model {
     /// linearize the model.
     fn time_step<D: Linear>(
         &self,
+        time: usize,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::State, Dual<D>>;
@@ -34,35 +35,38 @@ pub trait Model {
     /// The vector whose squared magnitude is the cost at the current time step.
     fn cost_vector<D: Linear>(
         &self,
+        time: usize,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::Cost, Dual<D>>;
 
     /// The valid range of each input. The lower bound must be less than or equal to
     /// the upper bound.
-    fn input_ranges(&self) -> Array<Self::Input, (f64, f64)>;
+    fn input_ranges(&self, time: usize) -> Array<Self::Input, (f64, f64)>;
 
     /// A convenience method to perform the time step without tracking any gradient.
     fn time_step_f64(
         &self,
+        time: usize,
         state: Array<Self::State, f64>,
         input: Array<Self::Input, f64>,
     ) -> Array<Self::State, f64> {
         let state = state.map(Dual::from);
         let input = input.map(Dual::from);
-        let next_state = self.time_step::<Zero>(state, input);
+        let next_state = self.time_step::<Zero>(time, state, input);
         next_state.map(Dual::value)
     }
 
     /// A convenience method to get the cost vector without tracking any gradient.
     fn cost_vector_f64(
         &self,
+        time: usize,
         state: Array<Self::State, f64>,
         input: Array<Self::Input, f64>,
     ) -> Array<Self::Cost, f64> {
         let state = state.map(Dual::from);
         let input = input.map(Dual::from);
-        let cost = self.cost_vector::<Zero>(state, input);
+        let cost = self.cost_vector::<Zero>(time, state, input);
         cost.map(Dual::value)
     }
 }

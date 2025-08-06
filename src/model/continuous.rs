@@ -22,6 +22,7 @@ pub trait Continuous {
     /// make it possible to linearize the model.
     fn state_deriv<D: Linear>(
         &self,
+        time: f64,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::State, Dual<D>>;
@@ -30,13 +31,14 @@ pub trait Continuous {
     /// in time.
     fn cost_vector<D: Linear>(
         &self,
+        time: f64,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::Cost, Dual<D>>;
 
     /// The valid range of each input. The lower bound must be less than or equal to
     /// the upper bound.
-    fn input_ranges(&self) -> Array<Self::Input, (f64, f64)>;
+    fn input_ranges(&self, time: f64) -> Array<Self::Input, (f64, f64)>;
 
     /// Turns `self` into a discrete time model using RK4 with zero order hold.
     fn discretize(self, delta_time: f64) -> RungeKutta4<Self>
@@ -64,6 +66,7 @@ pub trait ContinuousDiff {
     /// make it possible to linearize the model.
     fn state_deriv<D: Linear>(
         &self,
+        time: f64,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::State, Dual<D>>;
@@ -72,6 +75,7 @@ pub trait ContinuousDiff {
     /// in time.
     fn cost_vector<D: Linear>(
         &self,
+        time: f64,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
         input_deriv: Array<Self::Input, Dual<D>>,
@@ -79,7 +83,7 @@ pub trait ContinuousDiff {
 
     /// The valid range of each input. The lower bound must be less than or equal to
     /// the upper bound.
-    fn input_ranges(&self) -> Array<Self::Input, (f64, f64)>;
+    fn input_ranges(&self, time: f64) -> Array<Self::Input, (f64, f64)>;
 
     /// Turns `self` into a discrete time model using RK4 with zero order hold.
     ///
@@ -113,6 +117,7 @@ impl<M: Continuous> Model for RungeKutta4<M> {
 
     fn time_step<D: Linear>(
         &self,
+        time: usize,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::State, Dual<D>> {
@@ -126,10 +131,13 @@ impl<M: Continuous> Model for RungeKutta4<M> {
             state
         };
 
-        let k_1 = self.model.state_deriv(state, input);
-        let k_2 = self.model.state_deriv(perturb(&[(0.5, k_1)]), input);
-        let k_3 = self.model.state_deriv(perturb(&[(0.5, k_2)]), input);
-        let k_4 = self.model.state_deriv(perturb(&[(1.0, k_3)]), input);
+        let t1 = (time as f64 + 0.0) * self.delta_time;
+        let t2 = (time as f64 + 0.5) * self.delta_time;
+        let t3 = (time as f64 + 1.0) * self.delta_time;
+        let k_1 = self.model.state_deriv(t1, state, input);
+        let k_2 = self.model.state_deriv(t2, perturb(&[(0.5, k_1)]), input);
+        let k_3 = self.model.state_deriv(t2, perturb(&[(0.5, k_2)]), input);
+        let k_4 = self.model.state_deriv(t3, perturb(&[(1.0, k_3)]), input);
 
         perturb(&[
             (1.0 / 6.0, k_1),
@@ -141,6 +149,7 @@ impl<M: Continuous> Model for RungeKutta4<M> {
 
     fn cost_vector<D: Linear>(
         &self,
+        time: usize,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::Cost, Dual<D>> {
@@ -148,12 +157,12 @@ impl<M: Continuous> Model for RungeKutta4<M> {
         // integral style summation?
 
         self.model
-            .cost_vector(state, input)
+            .cost_vector(time as f64 * self.delta_time, state, input)
             .map(|value| value * self.delta_time)
     }
 
-    fn input_ranges(&self) -> Array<Self::Input, (f64, f64)> {
-        self.model.input_ranges()
+    fn input_ranges(&self, time: usize) -> Array<Self::Input, (f64, f64)> {
+        self.model.input_ranges(time as f64 * self.delta_time)
     }
 }
 
@@ -172,6 +181,7 @@ impl<M: ContinuousDiff> Model for RungeKutta4Diff<M> {
 
     fn time_step<D: Linear>(
         &self,
+        time: usize,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::State, Dual<D>> {
@@ -187,10 +197,13 @@ impl<M: ContinuousDiff> Model for RungeKutta4Diff<M> {
             state
         };
 
-        let k_1 = self.model.state_deriv(state, input);
-        let k_2 = self.model.state_deriv(perturb(&[(0.5, k_1)]), input);
-        let k_3 = self.model.state_deriv(perturb(&[(0.5, k_2)]), input);
-        let k_4 = self.model.state_deriv(perturb(&[(1.0, k_3)]), input);
+        let t1 = (time as f64 + 0.0) * self.delta_time;
+        let t2 = (time as f64 + 0.5) * self.delta_time;
+        let t3 = (time as f64 + 1.0) * self.delta_time;
+        let k_1 = self.model.state_deriv(t1, state, input);
+        let k_2 = self.model.state_deriv(t2, perturb(&[(0.5, k_1)]), input);
+        let k_3 = self.model.state_deriv(t2, perturb(&[(0.5, k_2)]), input);
+        let k_4 = self.model.state_deriv(t3, perturb(&[(1.0, k_3)]), input);
 
         let deriv = perturb(&[
             (1.0 / 6.0, k_1),
@@ -203,6 +216,7 @@ impl<M: ContinuousDiff> Model for RungeKutta4Diff<M> {
 
     fn cost_vector<D: Linear>(
         &self,
+        time: usize,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::Cost, Dual<D>> {
@@ -212,11 +226,11 @@ impl<M: ContinuousDiff> Model for RungeKutta4Diff<M> {
             .map(|(input, last_input)| (input - last_input) / self.delta_time);
 
         self.model
-            .cost_vector(state, input, deriv)
+            .cost_vector(time as f64 * self.delta_time, state, input, deriv)
             .map(|value| value * self.delta_time.sqrt())
     }
 
-    fn input_ranges(&self) -> Array<Self::Input, (f64, f64)> {
-        self.model.input_ranges()
+    fn input_ranges(&self, time: usize) -> Array<Self::Input, (f64, f64)> {
+        self.model.input_ranges(time as f64 * self.delta_time)
     }
 }
