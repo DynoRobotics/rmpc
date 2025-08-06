@@ -34,6 +34,10 @@ pub trait Continuous {
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::Cost, Dual<D>>;
 
+    /// The valid range of each input. The lower bound must be less than or equal to
+    /// the upper bound.
+    fn input_ranges(&self) -> Array<Self::Input, (f64, f64)>;
+
     /// Turns `self` into a discrete time model using RK4 with zero order hold.
     fn discretize(self, delta_time: f64) -> RungeKutta4<Self>
     where
@@ -72,6 +76,10 @@ pub trait ContinuousDiff {
         input: Array<Self::Input, Dual<D>>,
         input_deriv: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::Cost, Dual<D>>;
+
+    /// The valid range of each input. The lower bound must be less than or equal to
+    /// the upper bound.
+    fn input_ranges(&self) -> Array<Self::Input, (f64, f64)>;
 
     /// Turns `self` into a discrete time model using RK4 with zero order hold.
     ///
@@ -143,6 +151,10 @@ impl<M: Continuous> Model for RungeKutta4<M> {
             .cost_vector(state, input)
             .map(|value| value * self.delta_time)
     }
+
+    fn input_ranges(&self) -> Array<Self::Input, (f64, f64)> {
+        self.model.input_ranges()
+    }
 }
 
 /// A version of [`RungeKutta4`] for models implementing [`ContinuousDiff`].
@@ -202,5 +214,9 @@ impl<M: ContinuousDiff> Model for RungeKutta4Diff<M> {
         self.model
             .cost_vector(state, input, deriv)
             .map(|value| value * self.delta_time.sqrt())
+    }
+
+    fn input_ranges(&self) -> Array<Self::Input, (f64, f64)> {
+        self.model.input_ranges()
     }
 }

@@ -13,10 +13,6 @@ pub struct Mpc<M: Model, const N: usize> {
     pub state_traj: [Array<M::State, f64>; N],
     /// The reference trajectory of the input.
     pub input_traj: [Array<M::Input, f64>; N],
-    /// The lower bounds of the inputs.
-    pub lower: [Array<M::Input, f64>; N],
-    /// The upper bounds of the inputs.
-    pub upper: [Array<M::Input, f64>; N],
 
     /// The current active set.
     bounds: [Array<M::Input, Option<Bound>>; N],
@@ -48,14 +44,10 @@ impl<M: Model, const N: usize> Mpc<M, N> {
     pub fn new(
         state_traj: [Array<M::State, f64>; N],
         input_traj: [Array<M::Input, f64>; N],
-        lower: [Array<M::Input, f64>; N],
-        upper: [Array<M::Input, f64>; N],
     ) -> Self {
         Mpc {
             state_traj,
             input_traj,
-            lower,
-            upper,
             bounds: [repeat(None); N],
             model: PhantomData,
         }
@@ -65,8 +57,6 @@ impl<M: Model, const N: usize> Mpc<M, N> {
     pub fn shift(&mut self, steps: usize) {
         shift_left(&mut self.state_traj, steps);
         shift_left(&mut self.input_traj, steps);
-        shift_left(&mut self.lower, steps);
-        shift_left(&mut self.upper, steps);
         shift_left(&mut self.bounds, steps);
     }
 
@@ -112,8 +102,10 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             let (state_step, input_step) = jac_step.split_h();
             let (state_cost, input_cost) = jac_cost.split_h();
 
-            let upper = vector(self.upper[time_i]);
-            let lower = vector(self.lower[time_i]);
+            let ranges = model.input_ranges();
+            let upper = vector(ranges.map(|(_, upper)| upper));
+            let lower = vector(ranges.map(|(lower, _)| lower));
+
             let bounds = self.bounds[time_i];
 
             // Matrices used to find the optimal feedback.
@@ -185,8 +177,10 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         let mut to_change = (f64::NEG_INFINITY, 0, 0, None);
 
         for time_i in 0..N {
-            let upper = vector(self.upper[time_i]);
-            let lower = vector(self.lower[time_i]);
+            let ranges = model.input_ranges();
+            let upper = vector(ranges.map(|(_, upper)| upper));
+            let lower = vector(ranges.map(|(lower, _)| lower));
+
             let bounds = self.bounds[time_i];
 
             // The free inputs and dual variables at the current time step.

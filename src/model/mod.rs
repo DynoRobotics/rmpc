@@ -38,6 +38,10 @@ pub trait Model {
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::Cost, Dual<D>>;
 
+    /// The valid range of each input. The lower bound must be less than or equal to
+    /// the upper bound.
+    fn input_ranges(&self) -> Array<Self::Input, (f64, f64)>;
+
     /// A convenience method to perform the time step without tracking any gradient.
     fn time_step_f64(
         &self,

@@ -48,6 +48,10 @@ impl Continuous for Spring {
     ) -> [Dual<D>; 0] {
         []
     }
+
+    fn input_ranges(&self) -> SpringInput<(f64, f64)> {
+        SpringInput { force: (-1.0, 1.0) }
+    }
 }
 
 fn main() -> Result<()> {
