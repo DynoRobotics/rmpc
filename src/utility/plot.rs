@@ -57,7 +57,7 @@ impl Plot {
         states: Vec<A>,
     ) -> Self {
         for (i, name) in A::FIELD_NAMES.iter().enumerate() {
-            self = self.values(kind, name, states.iter().map(|s| s.as_ref()[i]).collect());
+            self = self.values(kind, name, states.iter().map(|s| s.as_slice()[i]).collect());
         }
         self
     }

@@ -22,7 +22,7 @@
 //!
 //! // Get a slice of the fields.
 //! let some_state = Pendulum { angle: 0.5, velocity: -1.0 };
-//! assert_eq!(some_state.as_ref(), &[0.5, -1.0]);
+//! assert_eq!(some_state.as_slice(), &[0.5, -1.0]);
 //!
 //! // Map the fields to a different type.
 //! let fixed_point_state = some_state.map(|field| (field * 1024.0) as i32);
@@ -103,28 +103,40 @@ pub unsafe trait ArrayInst: Copy {
 
     /// Gets a reference to the fields.
     ///
-    /// A const version is available as [`as_ref`].
+    /// A const version is available as [`as_slice`].
     #[inline(always)]
-    fn as_ref(&self) -> &[Self::Item] {
-        as_ref(self)
+    fn as_slice(&self) -> &[Self::Item] {
+        as_slice(self)
     }
 
     /// Gets a mutable reference to the fields.
     ///
-    /// A const version is available as [`as_mut`].
+    /// A const version is available as [`as_mut_slice`].
     #[inline(always)]
-    fn as_mut(&mut self) -> &mut [Self::Item] {
-        as_mut(self)
+    fn as_mut_slice(&mut self) -> &mut [Self::Item] {
+        as_mut_slice(self)
+    }
+
+    /// A convenicence method for `self.as_slice().iter()`.
+    #[inline]
+    fn iter(&self) -> std::slice::Iter<'_, Self::Item> {
+        self.as_slice().iter()
+    }
+
+    /// A convenicence method for `self.as_mut_slice().iter_mut()`.
+    #[inline]
+    fn iter_mut(&mut self) -> std::slice::IterMut<'_, Self::Item> {
+        self.as_mut_slice().iter_mut()
     }
 
     /// Maps the elements, producing an instance with a different field type.
     fn map<T: Copy>(self, mut f: impl FnMut(Self::Item) -> T) -> Array<Self::Gen, T> {
-        from_fn(|i| f(self.as_ref()[i]))
+        from_fn(|i| f(self.as_slice()[i]))
     }
 
     /// Zips `self` with another array that may have a different field type.
     fn zip<T: Copy>(self, other: Array<Self::Gen, T>) -> Array<Self::Gen, (Self::Item, T)> {
-        from_fn(|i| (self.as_ref()[i], other.as_ref()[i]))
+        from_fn(|i| (self.as_slice()[i], other.as_slice()[i]))
     }
 
     /// Concatenates `self` with another array that has the same field type.
@@ -176,18 +188,18 @@ pub fn from_fn<A: ArrayInst>(mut f: impl FnMut(usize) -> A::Item) -> A {
     unsafe { array.assume_init() }
 }
 
-/// A `const` version of [`ArrayInst::as_ref`].
+/// A `const` version of [`ArrayInst::slice`].
 #[inline]
-pub const fn as_ref<A: ArrayInst>(array: &A) -> &[A::Item] {
+pub const fn as_slice<A: ArrayInst>(array: &A) -> &[A::Item] {
     let ptr = (array as *const A).cast::<A::Item>();
     let len = A::Gen::LEN;
     // Safety: Enforced by the implementor.
     unsafe { std::slice::from_raw_parts(ptr, len) }
 }
 
-/// A `const` version of [`ArrayInst::as_mut`].
+/// A `const` version of [`ArrayInst::as_mut_slice`].
 #[inline]
-pub const fn as_mut<A: ArrayInst>(array: &mut A) -> &mut [A::Item] {
+pub const fn as_mut_slice<A: ArrayInst>(array: &mut A) -> &mut [A::Item] {
     let ptr = (array as *mut A).cast::<A::Item>();
     let len = A::Gen::LEN;
     // Safety: Enforced by the implementor.

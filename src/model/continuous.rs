@@ -124,7 +124,7 @@ impl<M: Continuous> Model for RungeKutta4<M> {
         let perturb = |offsets: &[(f64, Array<Self::State, _>)]| {
             let mut state = state;
             for &(scale, delta) in offsets {
-                for (state, &delta) in zip(state.as_mut(), delta.as_ref()) {
+                for (state, &delta) in zip(state.iter_mut(), delta.iter()) {
                     *state += scale * self.delta_time * delta;
                 }
             }
@@ -190,7 +190,7 @@ impl<M: ContinuousDiff> Model for RungeKutta4Diff<M> {
         let perturb = |offsets: &[(f64, Array<M::State, _>)]| {
             let mut state = state;
             for &(scale, delta) in offsets {
-                for (state, &delta) in zip(state.as_mut(), delta.as_ref()) {
+                for (state, &delta) in zip(state.iter_mut(), delta.iter()) {
                     *state += scale * self.delta_time * delta;
                 }
             }

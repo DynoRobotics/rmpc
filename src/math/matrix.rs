@@ -25,24 +25,24 @@ impl<R: GenArray, C: GenArray> Matrix<R, C> {
 
     /// The `i`th row of `self`.
     pub fn row(self, r: usize) -> Vector<C> {
-        Vector(self.0.as_ref()[r])
+        Vector(self.0.as_slice()[r])
     }
 
     /// The `i`th column of `self`.
     pub fn col(self, j: usize) -> Vector<R> {
-        Vector(self.0.map(|row| row.as_ref()[j]))
+        Vector(self.0.map(|row| row.as_slice()[j]))
     }
 
     /// Sets the `i`th row of `self`.
     pub fn set_row(&mut self, r: usize, row: Vector<C>) {
-        for (c, &value) in row.0.as_ref().iter().enumerate() {
+        for (c, &value) in row.0.iter().enumerate() {
             self[(r, c)] = value;
         }
     }
 
     /// Sets the `i`th column of `self`.
     pub fn set_col(&mut self, c: usize, col: Vector<R>) {
-        for (r, &value) in col.0.as_ref().iter().enumerate() {
+        for (r, &value) in col.0.iter().enumerate() {
             self[(r, c)] = value;
         }
     }
@@ -50,7 +50,7 @@ impl<R: GenArray, C: GenArray> Matrix<R, C> {
     /// Concatenates `self` with another matrix, horizontally.
     pub fn concat_h<D: GenArray>(self, other: Matrix<R, D>) -> Matrix<R, Concat<C, D>> {
         Matrix(array::from_fn(|i| {
-            self.0.as_ref()[i].concat(other.0.as_ref()[i])
+            self.0.as_slice()[i].concat(other.0.as_slice()[i])
         }))
     }
 
@@ -64,8 +64,8 @@ impl<R: GenArray, C: GenArray, D: GenArray> Matrix<R, Concat<C, D>> {
     /// Splits `self` into two matrices, horizontally.
     pub fn split_h(self) -> (Matrix<R, C>, Matrix<R, D>) {
         (
-            Matrix(array::from_fn(|i| self.0.as_ref()[i].0)),
-            Matrix(array::from_fn(|i| self.0.as_ref()[i].1)),
+            Matrix(array::from_fn(|i| self.0.as_slice()[i].0)),
+            Matrix(array::from_fn(|i| self.0.as_slice()[i].1)),
         )
     }
 }
@@ -88,7 +88,7 @@ impl<R: GenArray, C: GenArray> Clone for Matrix<R, C> {
 impl<R: GenArray, C: GenArray> std::fmt::Debug for Matrix<R, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list()
-            .entries(self.0.as_ref().iter().map(|arr| arr.as_ref()))
+            .entries(self.0.iter().map(|arr| arr.as_slice()))
             .finish()
     }
 }
@@ -102,8 +102,8 @@ impl<N: GenArray> Matrix<N, N> {
         let mut data: Self = Matrix(array::repeat(array::repeat(0.0)));
         let mut i = 0;
         while i < N::LEN {
-            let row = &mut array::as_mut(&mut data.0)[i];
-            array::as_mut(row)[i] = array::as_ref(&diag.0)[i];
+            let row = &mut array::as_mut_slice(&mut data.0)[i];
+            array::as_mut_slice(row)[i] = array::as_slice(&diag.0)[i];
             i += 1;
         }
         data
@@ -129,8 +129,8 @@ impl<R: GenArray, C: GenArray> Add for Matrix<R, C> {
 
 impl<R: GenArray, C: GenArray> AddAssign for Matrix<R, C> {
     fn add_assign(&mut self, rhs: Self) {
-        for (dst, src) in zip(self.0.as_mut(), rhs.0.as_ref()) {
-            for (dst, src) in zip(dst.as_mut(), src.as_ref()) {
+        for (dst, src) in zip(self.0.iter_mut(), rhs.0.iter()) {
+            for (dst, src) in zip(dst.iter_mut(), src.iter()) {
                 *dst += src;
             }
         }
@@ -148,8 +148,8 @@ impl<R: GenArray, C: GenArray> Sub for Matrix<R, C> {
 
 impl<R: GenArray, C: GenArray> SubAssign for Matrix<R, C> {
     fn sub_assign(&mut self, rhs: Self) {
-        for (dst, src) in zip(self.0.as_mut(), rhs.0.as_ref()) {
-            for (dst, src) in zip(dst.as_mut(), src.as_ref()) {
+        for (dst, src) in zip(self.0.iter_mut(), rhs.0.iter()) {
+            for (dst, src) in zip(dst.iter_mut(), src.iter()) {
                 *dst -= src;
             }
         }
@@ -167,8 +167,8 @@ impl<R: GenArray, C: GenArray> Mul<f64> for Matrix<R, C> {
 
 impl<R: GenArray, C: GenArray> MulAssign<f64> for Matrix<R, C> {
     fn mul_assign(&mut self, rhs: f64) {
-        for dst in self.0.as_mut() {
-            for dst in dst.as_mut() {
+        for dst in self.0.iter_mut() {
+            for dst in dst.iter_mut() {
                 *dst *= rhs;
             }
         }
@@ -231,8 +231,8 @@ impl<R: GenArray, C: GenArray> Div<f64> for Matrix<R, C> {
 
 impl<R: GenArray, C: GenArray> DivAssign<f64> for Matrix<R, C> {
     fn div_assign(&mut self, rhs: f64) {
-        for dst in self.0.as_mut() {
-            for dst in dst.as_mut() {
+        for dst in self.0.iter_mut() {
+            for dst in dst.iter_mut() {
                 *dst /= rhs;
             }
         }
@@ -247,12 +247,12 @@ impl<R: GenArray, C: GenArray> Index<(usize, usize)> for Matrix<R, C> {
     type Output = f64;
 
     fn index(&self, index: (usize, usize)) -> &f64 {
-        &self.0.as_ref()[index.0].as_ref()[index.1]
+        &self.0.as_slice()[index.0].as_slice()[index.1]
     }
 }
 
 impl<R: GenArray, C: GenArray> IndexMut<(usize, usize)> for Matrix<R, C> {
     fn index_mut(&mut self, index: (usize, usize)) -> &mut f64 {
-        &mut self.0.as_mut()[index.0].as_mut()[index.1]
+        &mut self.0.as_mut_slice()[index.0].as_mut_slice()[index.1]
     }
 }

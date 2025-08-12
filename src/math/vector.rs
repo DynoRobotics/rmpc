@@ -41,7 +41,7 @@ impl<A: GenArray> Clone for Vector<A> {
 
 impl<A: GenArray> std::fmt::Debug for Vector<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self.0.as_ref(), f)
+        std::fmt::Debug::fmt(self.0.as_slice(), f)
     }
 }
 
@@ -107,9 +107,7 @@ impl<A: GenArray> Mul for Vector<A> {
     type Output = f64;
 
     fn mul(self, rhs: Self) -> f64 {
-        zip(self.0.as_ref(), rhs.0.as_ref())
-            .map(|(l, r)| l * r)
-            .sum()
+        zip(self.0.iter(), rhs.0.iter()).map(|(l, r)| l * r).sum()
     }
 }
 
@@ -136,13 +134,13 @@ impl<A: GenArray> Index<usize> for Vector<A> {
 
     #[track_caller]
     fn index(&self, index: usize) -> &f64 {
-        self.0.as_ref().index(index)
+        self.0.as_slice().index(index)
     }
 }
 
 impl<A: GenArray> IndexMut<usize> for Vector<A> {
     #[track_caller]
     fn index_mut(&mut self, index: usize) -> &mut f64 {
-        self.0.as_mut().index_mut(index)
+        self.0.as_mut_slice().index_mut(index)
     }
 }

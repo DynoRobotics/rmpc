@@ -3,7 +3,6 @@ members = ["mpc_derive"]
 
 [workspace.lints.rust]
 missing_docs = "warn"
-elided_lifetimes_in_paths = "warn"
 unsafe_code = "deny" # Only used in the array module
 
 [package]

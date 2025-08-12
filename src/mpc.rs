@@ -108,7 +108,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             let lower = vector(ranges.map(|(lower, _)| lower));
 
             assert!(
-                zip(lower.0.as_ref(), upper.0.as_ref()).all(|(l, u)| l < u),
+                zip(lower.0.iter(), upper.0.iter()).all(|(l, u)| l < u),
                 "the lower bounds must be less than the upper bounds",
             );
 
@@ -127,7 +127,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             // with some inputs constrained. This modified matrix is no longer positive
             // definite but It can be shown that it still meets the conditions for
             // `inv_no_pivot`.
-            for (input_i, active) in active_set.as_mut().iter_mut().enumerate() {
+            for (input_i, active) in active_set.iter_mut().enumerate() {
                 let (sign, fixed) = match active {
                     Some(Bound::Lower) => (-1.0, lower[input_i]),
                     Some(Bound::Upper) => (1.0, upper[input_i]),
@@ -153,7 +153,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             mod_feedback_vec[time_i] = feedback_vec;
 
             // Revert the feedback to use the known inputs instead of dual variables.
-            for (input_i, active) in active_set.as_ref().iter().enumerate() {
+            for (input_i, active) in active_set.iter().enumerate() {
                 let fixed = match active {
                     Some(Bound::Lower) => lower[input_i],
                     Some(Bound::Upper) => upper[input_i],
@@ -199,7 +199,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             let mut mod_input = mod_feedback_mat[time_i] * state + mod_feedback_vec[time_i];
 
             // Check all the constraints while replacing the dual
-            for (input_i, active) in active_set.as_ref().iter().enumerate() {
+            for (input_i, active) in active_set.iter().enumerate() {
                 if let Some(active) = active {
                     // See if the dual is binding in the wrong direction, and if so, by how much.
                     let dual = mod_input[input_i];
@@ -247,7 +247,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         // deactivate a constraint to resolve it.
         let optimal = to_change.0.is_infinite();
         if !optimal {
-            self.active_set[to_change.1].as_mut()[to_change.2] = to_change.3;
+            self.active_set[to_change.1].as_mut_slice()[to_change.2] = to_change.3;
         }
 
         (optimal, first_input.unwrap())
