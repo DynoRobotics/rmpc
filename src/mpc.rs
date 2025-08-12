@@ -1,5 +1,6 @@
 //! Implementation of model predictive control.
 
+use std::iter::zip;
 use std::marker::PhantomData;
 
 use crate::Array;
@@ -15,7 +16,7 @@ pub struct Mpc<M: Model, const N: usize> {
     pub input_traj: [Array<M::Input, f64>; N],
 
     /// The current active set.
-    bounds: [Array<M::Input, Option<Bound>>; N],
+    active_set: [Array<M::Input, Option<Bound>>; N],
 
     model: PhantomData<fn(&M)>,
 }
@@ -48,7 +49,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         Mpc {
             state_traj,
             input_traj,
-            bounds: [repeat(None); N],
+            active_set: [repeat(None); N],
             model: PhantomData,
         }
     }
@@ -57,7 +58,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
     pub fn shift(&mut self, steps: usize) {
         shift_left(&mut self.state_traj, steps);
         shift_left(&mut self.input_traj, steps);
-        shift_left(&mut self.bounds, steps);
+        shift_left(&mut self.active_set, steps);
     }
 
     /// Performs a single QP iteration. Returns `true` or `false` depending on if
@@ -82,7 +83,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
 
         // The optimal cost given some state is given by the formula
         // ```
-        // state * cost_mat * state + cost_vec * state + const
+        // 1/2 * state * cost_mat * state + cost_vec * state + const
         // ```
         // where `const` is a constant we don't track as it doesn't affect where the
         // optimum is. These are modified as we iterate backwards in the loop below as
@@ -106,7 +107,12 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             let upper = vector(ranges.map(|(_, upper)| upper));
             let lower = vector(ranges.map(|(lower, _)| lower));
 
-            let bounds = self.bounds[time_i];
+            assert!(
+                zip(lower.0.as_ref(), upper.0.as_ref()).all(|(l, u)| l < u),
+                "the lower bounds must be less than the upper bounds",
+            );
+
+            let active_set = &mut self.active_set[time_i];
 
             // Matrices used to find the optimal feedback.
             let mut input_cost_mat = input_step.transpose() * cost_mat * input_step
@@ -121,12 +127,18 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             // with some inputs constrained. This modified matrix is no longer positive
             // definite but It can be shown that it still meets the conditions for
             // `inv_no_pivot`.
-            for (input_i, bound) in bounds.as_ref().iter().enumerate() {
-                let (sign, fixed) = match bound {
+            for (input_i, active) in active_set.as_mut().iter_mut().enumerate() {
+                let (sign, fixed) = match active {
                     Some(Bound::Lower) => (-1.0, lower[input_i]),
                     Some(Bound::Upper) => (1.0, upper[input_i]),
                     None => continue,
                 };
+
+                // Release infinite bounds from the active set immediately.
+                if !fixed.is_finite() {
+                    *active = None;
+                    continue;
+                }
 
                 cross_cost_vec += fixed * input_cost_mat.col(input_i);
                 input_cost_mat.set_col(input_i, Vector::ZERO);
@@ -141,8 +153,8 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             mod_feedback_vec[time_i] = feedback_vec;
 
             // Revert the feedback to use the known inputs instead of dual variables.
-            for (input_i, bound) in bounds.as_ref().iter().enumerate() {
-                let fixed = match bound {
+            for (input_i, active) in active_set.as_ref().iter().enumerate() {
+                let fixed = match active {
                     Some(Bound::Lower) => lower[input_i],
                     Some(Bound::Upper) => upper[input_i],
                     None => continue,
@@ -181,14 +193,14 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             let upper = vector(ranges.map(|(_, upper)| upper));
             let lower = vector(ranges.map(|(lower, _)| lower));
 
-            let bounds = self.bounds[time_i];
+            let active_set = self.active_set[time_i];
 
             // The free inputs and dual variables at the current time step.
             let mut mod_input = mod_feedback_mat[time_i] * state + mod_feedback_vec[time_i];
 
             // Check all the constraints while replacing the dual
-            for (input_i, bound) in bounds.as_ref().iter().enumerate() {
-                if let Some(bound) = bound {
+            for (input_i, active) in active_set.as_ref().iter().enumerate() {
+                if let Some(active) = active {
                     // See if the dual is binding in the wrong direction, and if so, by how much.
                     let dual = mod_input[input_i];
                     let priority = dual;
@@ -197,7 +209,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
                     }
 
                     // Replace the dual variable with the actual input.
-                    mod_input[input_i] = match bound {
+                    mod_input[input_i] = match active {
                         Bound::Lower => lower[input_i],
                         Bound::Upper => upper[input_i],
                     };
@@ -235,7 +247,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         // deactivate a constraint to resolve it.
         let optimal = to_change.0.is_infinite();
         if !optimal {
-            self.bounds[to_change.1].as_mut()[to_change.2] = to_change.3;
+            self.active_set[to_change.1].as_mut()[to_change.2] = to_change.3;
         }
 
         (optimal, first_input.unwrap())
