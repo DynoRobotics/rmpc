@@ -52,6 +52,34 @@ pub trait Continuous {
     }
 }
 
+impl<M: Continuous> Continuous for &M {
+    type State = M::State;
+    type Input = M::Input;
+    type Cost = M::Cost;
+
+    fn state_deriv<D: Linear>(
+        &self,
+        time: f64,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::State, Dual<D>> {
+        M::state_deriv(self, time, state, input)
+    }
+
+    fn cost_vector<D: Linear>(
+        &self,
+        time: f64,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::Cost, Dual<D>> {
+        M::cost_vector(self, time, state, input)
+    }
+
+    fn input_ranges(&self, time: f64) -> Array<Self::Input, (f64, f64)> {
+        M::input_ranges(self, time)
+    }
+}
+
 /// A modified version of [`Continuous`] where the derivative of the input can
 /// be used in the cost vector.
 pub trait ContinuousDiff {
@@ -96,6 +124,35 @@ pub trait ContinuousDiff {
             model: self,
             delta_time,
         }
+    }
+}
+
+impl<M: ContinuousDiff> ContinuousDiff for &M {
+    type State = M::State;
+    type Input = M::Input;
+    type Cost = M::Cost;
+
+    fn state_deriv<D: Linear>(
+        &self,
+        time: f64,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::State, Dual<D>> {
+        M::state_deriv(self, time, state, input)
+    }
+
+    fn cost_vector<D: Linear>(
+        &self,
+        time: f64,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+        input_deriv: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::Cost, Dual<D>> {
+        M::cost_vector(self, time, state, input, input_deriv)
+    }
+
+    fn input_ranges(&self, time: f64) -> Array<Self::Input, (f64, f64)> {
+        M::input_ranges(self, time)
     }
 }
 
