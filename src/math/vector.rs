@@ -1,5 +1,5 @@
-use std::iter::zip;
-use std::ops::{
+use core::iter::zip;
+use core::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign,
 };
 
@@ -39,9 +39,9 @@ impl<A: GenArray> Clone for Vector<A> {
     }
 }
 
-impl<A: GenArray> std::fmt::Debug for Vector<A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self.0.as_slice(), f)
+impl<A: GenArray> core::fmt::Debug for Vector<A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(self.0.as_slice(), f)
     }
 }
 

@@ -1,5 +1,7 @@
 //! A work in progress library for ergonomic model predictive control.
 
+#![no_std]
+
 pub mod array;
 pub mod math;
 pub mod model;

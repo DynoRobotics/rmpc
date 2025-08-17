@@ -14,6 +14,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+libm = "0.2.15"
 mpc_derive.path = "mpc_derive"
 
 [profile.dev]

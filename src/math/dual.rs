@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 use crate::math::{Linear, Matrix, Vector, matrix};
 use crate::{Array, ArrayInst, GenArray};
@@ -97,26 +97,26 @@ macro_rules! impl_funcs {
 }
 impl_funcs! {
     /// The square root of the value.
-    fn sqrt(v) = (v.sqrt(), 0.5 / v.sqrt());
+    fn sqrt(v) = (libm::sqrt(v), 0.5 / libm::sqrt(v));
     /// The sine of an angle in radians.
-    fn sin(v) = (v.sin(), v.cos());
+    fn sin(v) = (libm::sin(v), libm::cos(v));
     /// The cosine of an angle in radians.
-    fn cos(v) = (v.cos(), -v.sin());
+    fn cos(v) = (libm::cos(v), -libm::sin(v));
     /// The tangent of an angle in radians.
-    fn tan(v) = (v.tan(), v.cos().powi(-2));
+    fn tan(v) = (libm::tan(v), 1.0 / (libm::cos(v) * libm::cos(v)));
     /// The arcsine in radians of a value.
-    fn asin(v) = (v.asin(), 1.0 / (1.0 - v.powi(2)).sqrt());
+    fn asin(v) = (libm::asin(v), 1.0 / libm::sqrt(1.0 - v * v));
     /// The arccosine in radians of a value.
-    fn acos(v) = (v.acos(), -1.0 / (1.0 - v.powi(2)).sqrt());
+    fn acos(v) = (libm::acos(v), -1.0 / libm::sqrt(1.0 - v * v));
     /// The arctangent in radians of a value.
-    fn atan(v) = (v.atan(), 1.0 / (1.0 + v.powi(2)));
+    fn atan(v) = (libm::atan(v), 1.0 / (1.0 + v * v));
     /// The exponential (e<sup>x</sup>) of the value.
-    fn exp(v) = (v.exp(), v.exp());
+    fn exp(v) = (libm::exp(v), libm::exp(v));
     /// The natural logarithm (base e) of the value.
-    fn ln(v) = (v.ln(), 1.0 / v);
+    fn ln(v) = (libm::log(v), 1.0 / v);
 }
 
-impl<D: Linear> std::ops::Neg for Dual<D> {
+impl<D: Linear> core::ops::Neg for Dual<D> {
     type Output = Self;
     fn neg(self) -> Self {
         Dual {
@@ -128,7 +128,7 @@ impl<D: Linear> std::ops::Neg for Dual<D> {
 
 macro_rules! impl_op {
     ($trait:ident::$method:ident($l:ident, $r:ident) = $v:expr) => {
-        impl<D: Linear> std::ops::$trait for Dual<D> {
+        impl<D: Linear> core::ops::$trait for Dual<D> {
             type Output = Self;
             fn $method(self, rhs: Self) -> Self {
                 let $l = self.value;
@@ -138,7 +138,7 @@ macro_rules! impl_op {
                 Dual { value, grad }
             }
         }
-        impl<D: Linear> std::ops::$trait<f64> for Dual<D> {
+        impl<D: Linear> core::ops::$trait<f64> for Dual<D> {
             type Output = Self;
             fn $method(self, rhs: f64) -> Self {
                 let $l = self.value;
@@ -148,7 +148,7 @@ macro_rules! impl_op {
                 Dual { value, grad }
             }
         }
-        impl<D: Linear> std::ops::$trait<Dual<D>> for f64 {
+        impl<D: Linear> core::ops::$trait<Dual<D>> for f64 {
             type Output = Dual<D>;
             fn $method(self, rhs: Dual<D>) -> Dual<D> {
                 let $l = self;
@@ -163,18 +163,18 @@ macro_rules! impl_op {
 impl_op!(Add::add(l, r) = (l + r, [1.0, 1.0]));
 impl_op!(Sub::sub(l, r) = (l - r, [1.0, -1.0]));
 impl_op!(Mul::mul(l, r) = (l * r, [r, l]));
-impl_op!(Div::div(l, r) = (l / r, [1.0 / r, -l / r.powi(2)]));
+impl_op!(Div::div(l, r) = (l / r, [1.0 / r, -l / (r * r)]));
 
 macro_rules! impl_assign_op {
     ($atrait:ident::$amethod:ident = $trait:ident::$method:ident) => {
-        impl<D: Linear> std::ops::$atrait for Dual<D> {
+        impl<D: Linear> core::ops::$atrait for Dual<D> {
             fn $amethod(&mut self, rhs: Self) {
-                *self = std::ops::$trait::$method(*self, rhs);
+                *self = core::ops::$trait::$method(*self, rhs);
             }
         }
-        impl<D: Linear> std::ops::$atrait<f64> for Dual<D> {
+        impl<D: Linear> core::ops::$atrait<f64> for Dual<D> {
             fn $amethod(&mut self, rhs: f64) {
-                *self = std::ops::$trait::$method(*self, rhs);
+                *self = core::ops::$trait::$method(*self, rhs);
             }
         }
     };

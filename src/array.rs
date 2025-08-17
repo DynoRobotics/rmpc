@@ -51,7 +51,7 @@
 
 #![allow(unsafe_code)]
 
-use std::mem::MaybeUninit;
+use core::mem::MaybeUninit;
 
 pub use mpc_derive::GenArray;
 
@@ -74,7 +74,7 @@ pub trait GenArray {
     const LEN: usize;
 
     /// Constructs an instance from a function, similar to
-    /// [`std::array::from_fn`]. In some cases the equivalend function [`from_fn`]
+    /// [`core::array::from_fn`]. In some cases the equivalent function [`from_fn`]
     /// may provide better type inference.
     #[inline]
     fn from_fn<T: Copy>(f: impl FnMut(usize) -> T) -> Self::Arr<T> {
@@ -119,13 +119,13 @@ pub unsafe trait ArrayInst: Copy {
 
     /// A convenicence method for `self.as_slice().iter()`.
     #[inline]
-    fn iter(&self) -> std::slice::Iter<'_, Self::Item> {
+    fn iter(&self) -> core::slice::Iter<'_, Self::Item> {
         self.as_slice().iter()
     }
 
     /// A convenicence method for `self.as_mut_slice().iter_mut()`.
     #[inline]
-    fn iter_mut(&mut self) -> std::slice::IterMut<'_, Self::Item> {
+    fn iter_mut(&mut self) -> core::slice::IterMut<'_, Self::Item> {
         self.as_mut_slice().iter_mut()
     }
 
@@ -194,7 +194,7 @@ pub const fn as_slice<A: ArrayInst>(array: &A) -> &[A::Item] {
     let ptr = (array as *const A).cast::<A::Item>();
     let len = A::Gen::LEN;
     // Safety: Enforced by the implementor.
-    unsafe { std::slice::from_raw_parts(ptr, len) }
+    unsafe { core::slice::from_raw_parts(ptr, len) }
 }
 
 /// A `const` version of [`ArrayInst::as_mut_slice`].
@@ -203,7 +203,7 @@ pub const fn as_mut_slice<A: ArrayInst>(array: &mut A) -> &mut [A::Item] {
     let ptr = (array as *mut A).cast::<A::Item>();
     let len = A::Gen::LEN;
     // Safety: Enforced by the implementor.
-    unsafe { std::slice::from_raw_parts_mut(ptr, len) }
+    unsafe { core::slice::from_raw_parts_mut(ptr, len) }
 }
 
 impl<const N: usize> GenArray for [(); N] {

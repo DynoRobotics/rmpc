@@ -1,7 +1,7 @@
 //! Implementation of model predictive control.
 
-use std::iter::zip;
-use std::marker::PhantomData;
+use core::iter::zip;
+use core::marker::PhantomData;
 
 use crate::Array;
 use crate::array::{ArrayInst, Concat, from_fn, repeat};

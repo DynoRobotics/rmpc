@@ -1,5 +1,5 @@
-use std::iter::zip;
-use std::ops::{
+use core::iter::zip;
+use core::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign,
 };
 
@@ -85,8 +85,8 @@ impl<R: GenArray, C: GenArray> Clone for Matrix<R, C> {
     }
 }
 
-impl<R: GenArray, C: GenArray> std::fmt::Debug for Matrix<R, C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<R: GenArray, C: GenArray> core::fmt::Debug for Matrix<R, C> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_list()
             .entries(self.0.iter().map(|arr| arr.as_slice()))
             .finish()

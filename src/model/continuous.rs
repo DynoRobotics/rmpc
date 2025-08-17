@@ -1,4 +1,4 @@
-use std::iter::zip;
+use core::iter::zip;
 
 use crate::array::Concat;
 use crate::math::{Dual, Linear};
@@ -284,7 +284,7 @@ impl<M: ContinuousDiff> Model for RungeKutta4Diff<M> {
 
         self.model
             .cost_vector(time as f64 * self.delta_time, state, input, deriv)
-            .map(|value| value * self.delta_time.sqrt())
+            .map(|value| value * libm::sqrt(self.delta_time))
     }
 
     fn input_ranges(&self, time: usize) -> Array<Self::Input, (f64, f64)> {

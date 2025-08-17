@@ -1,4 +1,4 @@
-use std::ops::{Add, Mul, Neg, Sub};
+use core::ops::{Add, Mul, Neg, Sub};
 
 /// A copyable type obeying the rules of a vector field.
 pub trait Linear:
