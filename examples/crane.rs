@@ -49,7 +49,7 @@ impl Continuous for Crane {
         let target_vel = input.target_vel;
 
         let trolley_accel = (target_vel - trolley_vel) / self.time_const;
-        let load_accel = -self.gravity / self.length * load_angle.sin()
+        let load_accel = self.gravity / self.length * load_angle.sin()
             - trolley_accel / self.length * load_angle.cos();
 
         State {
@@ -136,8 +136,8 @@ async fn main() {
         let camera = camera(
             -0.5 * visible_size,
             0.5 * visible_size,
-            -0.25 * model.length as f32,
-            1.25 * model.length as f32,
+            -1.25 * model.length as f32,
+            0.25 * model.length as f32,
         );
         set_camera(&camera);
 
@@ -184,7 +184,7 @@ async fn main() {
             state.trolley_pos as f32,
             0.0,
             (state.trolley_pos + model.length * state.load_angle.sin()) as f32,
-            (model.length * state.load_angle.cos()) as f32,
+            (model.length * -state.load_angle.cos()) as f32,
             0.07,
             LIGHTGRAY,
         );
@@ -192,14 +192,15 @@ async fn main() {
         // Trolley
         draw_rectangle(state.trolley_pos as f32 - 0.2, -0.1, 0.4, 0.2, WHITE);
 
+        // Load
         draw_rectangle_ex(
             (state.trolley_pos + model.length * state.load_angle.sin()) as f32,
-            (model.length * state.load_angle.cos()) as f32,
+            (model.length * -state.load_angle.cos()) as f32,
             0.3,
             0.3,
             DrawRectangleParams {
                 offset: vec2(0.5, 0.5),
-                rotation: -state.load_angle as f32,
+                rotation: state.load_angle as f32,
                 color: WHITE,
             },
         );
