@@ -27,7 +27,7 @@ fn row_addition<R: GenArray, C: GenArray>(
 /// main diagonal.
 ///
 /// ```
-/// # use mpc::math::{Matrix, inv_no_pivot, matrix};
+/// # use rmpc::math::{Matrix, inv_no_pivot, matrix};
 /// // A positive semidefinite matrix, fulfills the criteria.
 /// let good_matrix = matrix([
 ///     [1.0, 0.5, 0.7],

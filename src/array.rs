@@ -11,7 +11,7 @@
 //! generic types as arrays, for example:
 //!
 //! ```
-//! use mpc::{GenArray, ArrayInst};
+//! use rmpc::{GenArray, ArrayInst};
 //!
 //! #[derive(Clone, Copy, GenArray, PartialEq, Debug)]
 //! #[repr(C)]
@@ -53,7 +53,7 @@
 
 use core::mem::MaybeUninit;
 
-pub use mpc_derive::GenArray;
+pub use rmpc_derive::GenArray;
 
 /// A generic fixed-size array. See the [module documentation][`self`] for more
 /// information.

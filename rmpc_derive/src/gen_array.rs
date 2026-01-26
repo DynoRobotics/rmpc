@@ -108,11 +108,11 @@ pub fn handle_as_vector(input: DeriveInput) -> Result<TokenStream> {
     let len = fields.len();
 
     Ok(quote! {
-        impl ::mpc::GenArray for #name<()> {
+        impl ::rmpc::GenArray for #name<()> {
             type Arr<#generic: Copy> = #name<#generic>;
             const LEN: usize = #len;
         }
-        unsafe impl<#generic: Copy> ::mpc::ArrayInst for #name<#generic> {
+        unsafe impl<#generic: Copy> ::rmpc::ArrayInst for #name<#generic> {
             type Gen = #name<()>;
             type Item = #generic;
         }

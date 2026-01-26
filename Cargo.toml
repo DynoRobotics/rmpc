@@ -1,12 +1,12 @@
 [workspace]
-members = ["mpc_derive"]
+members = ["rmpc_derive"]
 
 [workspace.lints.rust]
 missing_docs = "warn"
 unsafe_code = "deny" # Only used in the array module
 
 [package]
-name = "mpc"
+name = "rmpc"
 version = "0.1.0"
 edition = "2024"
 
@@ -15,7 +15,7 @@ workspace = true
 
 [dependencies]
 libm = "0.2.15"
-mpc_derive.path = "mpc_derive"
+rmpc_derive.path = "rmpc_derive"
 
 [profile.dev]
 opt-level = 1

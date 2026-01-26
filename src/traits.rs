@@ -1,4 +1,4 @@
-pub use mpc_derive::FieldNames;
+pub use rmpc_derive::FieldNames;
 
 /// A trait for getting the field names of structs.
 ///
@@ -7,7 +7,7 @@ pub use mpc_derive::FieldNames;
 /// This trait can be used with `#[derive]` on any kind of struct.
 ///
 /// ```
-/// use mpc::FieldNames;
+/// use rmpc::FieldNames;
 ///
 /// #[derive(FieldNames)]
 /// struct Complex {

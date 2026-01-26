@@ -3,10 +3,10 @@
 use std::f64::consts::{PI, TAU};
 
 use macroquad::prelude::*;
-use mpc::math::Dual;
-use mpc::model::{Continuous, Model};
-use mpc::mpc::Mpc;
-use mpc::{FieldNames, GenArray};
+use rmpc::math::{Dual, Linear};
+use rmpc::model::{Continuous, Model};
+use rmpc::mpc::Mpc;
+use rmpc::{FieldNames, GenArray};
 
 #[derive(GenArray, FieldNames, Clone, Copy)]
 #[repr(C)]
@@ -37,7 +37,7 @@ impl Continuous for Crane {
     type Input = Input<()>;
     type Cost = [(); 3];
 
-    fn state_deriv<D: mpc::math::Linear>(
+    fn state_deriv<D: Linear>(
         &self,
         _time: f64,
         state: State<Dual<D>>,
@@ -61,7 +61,7 @@ impl Continuous for Crane {
         }
     }
 
-    fn cost_vector<D: mpc::math::Linear>(
+    fn cost_vector<D: Linear>(
         &self,
         _time: f64,
         state: State<Dual<D>>,

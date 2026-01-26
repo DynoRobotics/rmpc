@@ -34,7 +34,7 @@ pub fn handle_field_names(input: DeriveInput) -> Result<TokenStream> {
     let wher = &input.generics.where_clause;
 
     Ok(quote! {
-        impl #gen_defs ::mpc::FieldNames for #name <#(#gen_args),*> #wher {
+        impl #gen_defs ::rmpc::FieldNames for #name <#(#gen_args),*> #wher {
             const FIELD_NAMES: &'static [&'static str] = &[#(#field_names),*];
         }
     })
