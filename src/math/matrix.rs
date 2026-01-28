@@ -18,6 +18,11 @@ pub fn matrix<R: ArrayInst<Item = C>, C: ArrayInst<Item = f64>>(rows: R) -> Matr
 }
 
 impl<R: GenArray, C: GenArray> Matrix<R, C> {
+    /// Constructs a matrix by calling the function for each cell.
+    pub fn from_fn(mut f: impl FnMut(usize, usize) -> f64) -> Self {
+        Matrix(R::from_fn(|r| C::from_fn(|c| f(r, c))))
+    }
+
     /// The transpose of `self`.
     pub fn transpose(self) -> Matrix<C, R> {
         Matrix(C::from_fn(|row| R::from_fn(|col| self[(col, row)])))
