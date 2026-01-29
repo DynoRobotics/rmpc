@@ -2,7 +2,7 @@
 //!
 //! The idea is that, while the state and input of a system are vectors in the
 //! mathematical sense, using an array of values to represent them gets a bit
-//! annoying in practice due to having to remember whick index corresponds to
+//! annoying in practice due to having to remember which index corresponds to
 //! which physical quantity. Due to the currently quite limited support for
 //! const generics in the Rust compiler it also isnt't possible to, for example,
 //! concatenate two different types of vectors into one larger vector.
@@ -188,7 +188,7 @@ pub fn from_fn<A: ArrayInst>(mut f: impl FnMut(usize) -> A::Item) -> A {
     unsafe { array.assume_init() }
 }
 
-/// A `const` version of [`ArrayInst::slice`].
+/// A `const` version of [`ArrayInst::as_slice`].
 #[inline]
 pub const fn as_slice<A: ArrayInst>(array: &A) -> &[A::Item] {
     let ptr = (array as *const A).cast::<A::Item>();

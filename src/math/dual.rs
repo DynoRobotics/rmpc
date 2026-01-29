@@ -66,6 +66,45 @@ impl<D> Dual<D> {
     pub fn value(self) -> f64 {
         self.value
     }
+
+    /// Gets the sign of `self`. Its derivative is always zero.
+    pub fn signum(self) -> f64 {
+        self.value.signum()
+    }
+
+    /// Gets the minimum of `self` and `other`.
+    pub fn min(self, other: impl Into<Self>) -> Self {
+        let other = other.into();
+        if self.value < other.value {
+            self
+        } else {
+            other
+        }
+    }
+
+    /// Gets the maximum of `self` and `other`.
+    pub fn max(self, other: impl Into<Self>) -> Self {
+        let other = other.into();
+        if self.value < other.value {
+            other
+        } else {
+            self
+        }
+    }
+
+    /// Clamps `self` to the range `min..=max`. Assumes `min <= max`.
+    pub fn clamp(self, min: impl Into<Self>, max: impl Into<Self>) -> Self {
+        // Note: They should be this way around, since it should be at least the minimum
+        // and at most the maximum.
+        self.max(min).min(max)
+    }
+}
+
+impl<D: Linear> Dual<D> {
+    /// Gets the absolute value of `self`.
+    pub fn abs(self) -> Self {
+        self * self.signum()
+    }
 }
 
 impl<D: Linear> From<f64> for Dual<D> {
