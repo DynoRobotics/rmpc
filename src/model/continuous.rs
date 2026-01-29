@@ -23,6 +23,7 @@ pub trait Continuous {
     fn state_deriv<D: Linear>(
         &self,
         time: f64,
+        time_idx: usize,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::State, Dual<D>>;
@@ -32,6 +33,7 @@ pub trait Continuous {
     fn cost_vector<D: Linear>(
         &self,
         time: f64,
+        time_idx: usize,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::Cost, Dual<D>>;
@@ -60,19 +62,21 @@ impl<M: Continuous> Continuous for &M {
     fn state_deriv<D: Linear>(
         &self,
         time: f64,
+        time_idx: usize,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::State, Dual<D>> {
-        M::state_deriv(self, time, state, input)
+        M::state_deriv(self, time, time_idx, state, input)
     }
 
     fn cost_vector<D: Linear>(
         &self,
         time: f64,
+        time_idx: usize,
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::Cost, Dual<D>> {
-        M::cost_vector(self, time, state, input)
+        M::cost_vector(self, time, time_idx, state, input)
     }
 
     fn input_ranges(&self, time: f64) -> Array<Self::Input, (f64, f64)> {
@@ -187,14 +191,15 @@ impl<M: Continuous> Model for RungeKutta4<M> {
             }
             state
         };
+        let deriv = |step: f64, state: Array<Self::State, _>| {
+            let t = (time as f64 + step) * self.delta_time;
+            self.model.state_deriv(t, time, state, input)
+        };
 
-        let t1 = (time as f64 + 0.0) * self.delta_time;
-        let t2 = (time as f64 + 0.5) * self.delta_time;
-        let t3 = (time as f64 + 1.0) * self.delta_time;
-        let k_1 = self.model.state_deriv(t1, state, input);
-        let k_2 = self.model.state_deriv(t2, perturb(&[(0.5, k_1)]), input);
-        let k_3 = self.model.state_deriv(t2, perturb(&[(0.5, k_2)]), input);
-        let k_4 = self.model.state_deriv(t3, perturb(&[(1.0, k_3)]), input);
+        let k_1 = deriv(0.0, state);
+        let k_2 = deriv(0.5, perturb(&[(0.5, k_1)]));
+        let k_3 = deriv(0.5, perturb(&[(0.5, k_2)]));
+        let k_4 = deriv(1.0, perturb(&[(1.0, k_3)]));
 
         perturb(&[
             (1.0 / 6.0, k_1),
@@ -214,7 +219,7 @@ impl<M: Continuous> Model for RungeKutta4<M> {
         // integral style summation?
 
         self.model
-            .cost_vector(time as f64 * self.delta_time, state, input)
+            .cost_vector(time as f64 * self.delta_time, time, state, input)
             .map(|value| value * self.delta_time)
     }
 

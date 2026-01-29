@@ -40,6 +40,7 @@ impl Continuous for Crane {
     fn state_deriv<D: Linear>(
         &self,
         _time: f64,
+        _time_idx: usize,
         state: State<Dual<D>>,
         input: Input<Dual<D>>,
     ) -> State<Dual<D>> {
@@ -64,6 +65,7 @@ impl Continuous for Crane {
     fn cost_vector<D: Linear>(
         &self,
         _time: f64,
+        _time_idx: usize,
         state: State<Dual<D>>,
         input: Input<Dual<D>>,
     ) -> [Dual<D>; 3] {
