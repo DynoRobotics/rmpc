@@ -153,14 +153,14 @@ async fn main() {
         // If the rate at which we rendered was constant and equal to the sample time of
         // the model, then calling `.shift(1)` before iterating would reduce the number
         // of iterations.
-        let mut input = Input::from_fn(|_| 0.0);
+        let mut inputs = [Input::from_fn(|_| 0.0)];
         for _ in 0..5 {
-            let done;
-            (done, input) = mpc.iterate(&mpc_model, state);
+            let done = mpc.iterate(&mpc_model, state, None, Some(&mut inputs));
             if done {
                 break;
             }
         }
+        let input = inputs[0];
 
         // Simulate the model using the input.
         let model = &mpc_model.model;

@@ -62,13 +62,22 @@ impl<M: Model, const N: usize> Mpc<M, N> {
     }
 
     /// Performs a single QP iteration. Returns `true` or `false` depending on if
-    /// convergence has been reached, along with the input.
+    /// convergence has been reached.
+    ///
+    /// If `states` and/or `inputs` are provided, they will be filled with the
+    /// trajectory of the solution. Any indices after the horizon will not be
+    /// modified.
     pub fn iterate(
         &mut self,
         model: &M,
         initial_state: Array<M::State, f64>,
-    ) -> (bool, Array<M::Input, f64>) {
+        states: Option<&mut [Array<M::State, f64>]>,
+        inputs: Option<&mut [Array<M::Input, f64>]>,
+    ) -> bool {
         assert!(N > 0, "needs at least one time step before the horizon");
+
+        let states = states.unwrap_or(&mut []);
+        let inputs = inputs.unwrap_or(&mut []);
 
         // At each point in time we have a vector `mod_input` consisting of the input
         // value for non-constrained inputs and the dual variables for constrained
@@ -181,7 +190,6 @@ impl<M: Model, const N: usize> Mpc<M, N> {
         // With the optimal feedback known, we can find the actual trajectory and see
         // which inputs should be activated or deactivated.
         let mut state = Vector(initial_state);
-        let mut first_input = None;
 
         // We want to find the constrained input with the largest positive dual variable
         // if there is one, or the unconstrained input farthest outside its bounds
@@ -198,7 +206,7 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             // The free inputs and dual variables at the current time step.
             let mut mod_input = mod_feedback_mat[time_i] * state + mod_feedback_vec[time_i];
 
-            // Check all the constraints while replacing the dual
+            // Check all the constraints while replacing the dual with actual input values.
             for (input_i, active) in active_set.iter().enumerate() {
                 if let Some(active) = active {
                     // See if the dual is binding in the wrong direction, and if so, by how much.
@@ -231,16 +239,19 @@ impl<M: Model, const N: usize> Mpc<M, N> {
                 }
             }
 
+            if let Some(out) = states.get_mut(time_i) {
+                *out = state.0;
+            }
+            if let Some(out) = inputs.get_mut(time_i) {
+                *out = from_fn(|i| mod_input[i].clamp(lower[i], upper[i]));
+            }
+
             // Continue the trajectory using this input.
             state = eval_linearized(
                 vector(self.state_traj[time_i].concat(self.input_traj[time_i])),
                 state.concat(mod_input),
                 |Concat(state, input)| model.time_step(time_i, state, input),
             );
-
-            if time_i == 0 {
-                first_input = Some(from_fn(|i| mod_input[i].clamp(lower[i], upper[i])));
-            }
         }
 
         // If we found a problem, the solution is suboptimal and we need to activate or
@@ -250,6 +261,6 @@ impl<M: Model, const N: usize> Mpc<M, N> {
             self.active_set[to_change.1].as_mut_slice()[to_change.2] = to_change.3;
         }
 
-        (optimal, first_input.unwrap())
+        optimal
     }
 }
