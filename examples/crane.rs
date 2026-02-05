@@ -5,7 +5,7 @@ use std::f64::consts::{PI, TAU};
 use macroquad::prelude::*;
 use rmpc::math::{Dual, Linear};
 use rmpc::model::{Continuous, Model};
-use rmpc::mpc::Mpc;
+use rmpc::mpc::{self, MpcStep};
 use rmpc::{FieldNames, GenArray};
 
 #[derive(GenArray, FieldNames, Clone, Copy)]
@@ -128,9 +128,14 @@ async fn main() {
         load_ang_vel: 0.0,
     };
     let traj_input = Input { target_vel: 0.0 };
-    let mut mpc = Mpc::<_, 50>::new([traj_point; _], [traj_input; _]);
+
+    let mut steps = vec![MpcStep::new(); 50];
 
     let mut mpc_model = model.discretize(0.2);
+
+    for (i, step) in steps.iter_mut().enumerate() {
+        step.linearize(&mpc_model, traj_point, traj_input, i);
+    }
 
     loop {
         // Position the camera so everything is visible
@@ -147,20 +152,22 @@ async fn main() {
         let (mouse_x, mouse_y) = mouse_position();
         mpc_model.model.target_pos = camera.screen_to_world(vec2(mouse_x, mouse_y)).x as f64;
 
-        // Iterate a few times to find a good solution. Usually only one is needed but
-        // more may be necessary.
-        //
-        // If the rate at which we rendered was constant and equal to the sample time of
-        // the model, then calling `.shift(1)` before iterating would reduce the number
-        // of iterations.
-        let mut inputs = [Input::from_fn(|_| 0.0)];
-        for _ in 0..5 {
-            let done = mpc.iterate(&mpc_model, state, None, Some(&mut inputs));
+        // Re-linearize the model as it has changed
+        for (i, step) in steps.iter_mut().enumerate() {
+            step.linearize(&mpc_model, traj_point, traj_input, i);
+        }
+
+        // Iterate a few times to find a good solution. We need an iteration limit in
+        // case the solver doesn't detect convergence. This is acceptable as even if the
+        // solver hasn't converged completely, a suboptimal input should be much better
+        // than not having a solution in time.
+        for _ in 0..10 {
+            let done = mpc::iterate(state, &mut steps);
             if done {
                 break;
             }
         }
-        let input = inputs[0];
+        let input = steps[0].optimal_input;
 
         // Simulate the model using the input.
         let model = &mpc_model.model;
