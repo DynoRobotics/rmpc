@@ -45,7 +45,8 @@ fn row_addition<R: GenArray, C: GenArray>(
 ///     [1.5, 1.0, 0.5],
 /// ]);
 /// let failed_inverse = inv_no_pivot(bad_matrix);
-/// assert!(failed_inverse.0.iter().flatten().any(|elem| elem.is_nan()));
+/// let not_zero = failed_inverse * bad_matrix - Matrix::IDENTITY;
+/// assert!(not_zero.0.iter().flatten().any(|elem| elem.abs() >= 0.1));
 ///
 /// let inverse = matrix([
 ///     [ 16.0, -6.0, -2.0],
@@ -62,7 +63,10 @@ pub fn inv_no_pivot<N: GenArray>(matrix: Matrix<N, N>) -> Matrix<N, N> {
     // To do: This should be doable with less operations as the RHS is known to
     // start out as the identity matrix.
     for pivot in 0..N::LEN {
-        let scale = 1.0 / lhs[(pivot, pivot)];
+        // If the diagonal element is nonzero, eliminate it.
+        let diag = lhs[(pivot, pivot)];
+        let scale = if diag != 0.0 { 1.0 / diag } else { 0.0 };
+
         row_multiplication(&mut lhs, pivot, scale);
         row_multiplication(&mut rhs, pivot, scale);
 
