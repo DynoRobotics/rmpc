@@ -146,12 +146,12 @@ fn factorize<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [RiccatiStep<S, 
     for step in steps.iter_mut().rev() {
         let cost_xx = step.state_cost.transpose() * step.state_cost;
         let cost_xu = step.state_cost.transpose() * step.input_cost;
+        let cost_uu = step.input_cost.transpose() * step.input_cost;
 
         let tmp = step.state_step.transpose() * next_p;
         let f_mat = cost_xx + tmp * step.state_step;
         step.h_mat = cost_xu + tmp * step.input_step;
 
-        let cost_uu = step.input_cost.transpose() * step.input_cost;
         let mut g_mat = cost_uu + step.input_step.transpose() * next_p * step.input_step;
 
         // Only the non-fixed inputs should be included in F and G. Set the rest to zero.
@@ -185,17 +185,15 @@ fn backward_recursion<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [Riccat
     let mut next_p = Matrix::ZERO;
 
     for step in steps.iter_mut().rev() {
-        let const_input = step
-            .active_set
-            .zip(step.input_ranges)
-            .map(|(bound, (lower, upper))| match bound {
+        let const_input = vector(step.active_set.zip(step.input_ranges).map(
+            |(bound, (lower, upper))| match bound {
                 Some(Bound::Lower) => lower,
                 Some(Bound::Upper) => upper,
                 None => 0.0,
-            });
+            },
+        ));
 
-        let av = step.input_step * vector(const_input) + step.const_step;
-
+        let av = step.input_step * const_input + step.const_step;
         let tmp = next_psi - next_p * av;
 
         step.k_vec = step.g_inv
@@ -203,7 +201,11 @@ fn backward_recursion<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [Riccat
 
         step.psi_vec = step.state_step.transpose() * tmp
             - step.h_mat * step.k_vec
-            - step.state_cost.transpose() * step.const_cost;
+            - step.state_cost.transpose() * step.const_cost
+            // Where does this term come from? It's not in the paper but appears to be
+            // necessary to make the math work out.
+            - (step.input_cost * step.k_mat + step.state_cost).transpose()
+                * (step.input_cost * const_input);
 
         next_psi = step.psi_vec;
         next_p = step.p_mat;
@@ -218,16 +220,15 @@ fn forward_recursion<S: GenArray, I: GenArray, C: GenArray>(
     let mut x = vector(initial_state);
 
     for step in steps.iter_mut() {
-        let const_input = step
-            .active_set
-            .zip(step.input_ranges)
-            .map(|(bound, (lower, upper))| match bound {
+        let const_input = vector(step.active_set.zip(step.input_ranges).map(
+            |(bound, (lower, upper))| match bound {
                 Some(Bound::Lower) => lower,
                 Some(Bound::Upper) => upper,
                 None => 0.0,
-            });
+            },
+        ));
 
-        let u = step.k_mat * x + step.k_vec + vector(const_input);
+        let u = step.k_mat * x + step.k_vec + const_input;
 
         step.optimal_state = x.0;
         step.optimal_input = u.0;
