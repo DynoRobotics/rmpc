@@ -1,7 +1,9 @@
-use crate::math::{Linear, Matrix};
+use crate::array::repeat;
+use crate::math::{Linear, Matrix, Vector, matrix};
 use crate::{Array, ArrayInst, GenArray};
 
 /// A cholesky decomposition of a subset of the rows/columns of a matrix.
+#[derive(Clone)]
 pub struct Cholesky<N: GenArray> {
     // The lower triangular factor. The inactive rows and columns should be set to
     // zero.
@@ -11,6 +13,14 @@ pub struct Cholesky<N: GenArray> {
 }
 
 impl<N: GenArray> Cholesky<N> {
+    /// An instance of [`Cholesky`] where no rows/columns are active.
+    pub const EMPTY: Self = {
+        Cholesky {
+            data: Matrix::ZERO,
+            active: repeat(false),
+        }
+    };
+
     /// Finds a Cholesky decomposition of the specified part of the matrix.
     ///
     /// This assumes the active part of the matrix is symmetric positive definite.
@@ -97,6 +107,15 @@ impl<N: GenArray> Cholesky<N> {
     pub fn solve<M: GenArray>(&self, rhs: &mut Matrix<N, M>) {
         self.lower_solve(rhs);
         self.upper_solve(rhs);
+    }
+
+    /// Solves for `x` in the equation `L * L^T * x = b`.
+    ///
+    /// This does not affect the elements in the inactive rows.
+    pub fn solve_vec(&self, rhs: Vector<N>) -> Vector<N> {
+        let mut mat = matrix([rhs.0]).transpose();
+        self.solve(&mut mat);
+        mat.col(0)
     }
 
     /// Computes `L^T * A`, modifying `A` in place.
