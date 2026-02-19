@@ -182,6 +182,7 @@ fn backward_recursion<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [Riccat
         ));
 
         let av = step.input_step * const_input + step.const_step;
+        let cv = step.input_cost * const_input + step.const_cost;
         let tmp = step.psi_vec - step.p_mat * av;
 
         step.k_vec = step.g_mat.solve_vec(
@@ -194,12 +195,8 @@ fn backward_recursion<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [Riccat
         }
 
         psi_vec = step.state_step.transpose() * tmp
-            - step.h_mat * step.k_vec
-            - step.state_cost.transpose() * step.const_cost
-            // Where does this term come from? It's not in the paper but appears to be
-            // necessary to make the math work out.
-            - (step.input_cost * step.k_mat + step.state_cost).transpose()
-                * (step.input_cost * const_input);
+            - step.state_cost.transpose() * cv
+            - step.h_mat * step.k_vec;
     }
 }
 
