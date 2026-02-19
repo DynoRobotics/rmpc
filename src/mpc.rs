@@ -153,7 +153,7 @@ pub fn iterate<S: GenArray, I: GenArray, C: GenArray>(
         let lower = vector(step.input_ranges.map(|(lower, _)| lower));
 
         assert!(
-            zip(lower.0.iter(), upper.0.iter()).all(|(l, u)| l < u),
+            zip(lower.into_array().iter(), upper.into_array().iter()).all(|(l, u)| l < u),
             "the lower bounds must be less than the upper bounds",
         );
 
@@ -224,7 +224,7 @@ pub fn iterate<S: GenArray, I: GenArray, C: GenArray>(
 
     // With the optimal feedback known, we can find the actual trajectory and see
     // which inputs should be activated or deactivated.
-    let mut state = Vector(initial_state);
+    let mut state = vector(initial_state);
 
     // We want to find the constrained input with the largest positive dual variable
     // if there is one, or the unconstrained input farthest outside its bounds
@@ -271,7 +271,7 @@ pub fn iterate<S: GenArray, I: GenArray, C: GenArray>(
             }
         }
 
-        step.optimal_state = state.0;
+        step.optimal_state = state.into_array();
         step.optimal_input = from_fn(|i| mod_input[i].clamp(lower[i], upper[i]));
 
         // Continue the trajectory using this input.

@@ -185,9 +185,9 @@ fn backward_recursion<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [Riccat
         let cv = step.input_cost * const_input + step.const_cost;
         let tmp = step.psi_vec - step.p_mat * av;
 
-        step.k_vec = step.g_mat.solve_vec(
-            step.input_step.transpose() * tmp - step.input_cost.transpose() * step.const_cost,
-        );
+        step.k_vec =
+            step.input_step.transpose() * tmp - step.input_cost.transpose() * step.const_cost;
+        step.g_mat.solve(&mut step.k_vec);
         for (i, active) in step.g_mat.active().iter().enumerate() {
             if !active {
                 step.k_vec[i] = 0.0;
@@ -244,10 +244,11 @@ fn forward_recursion<S: GenArray, I: GenArray, C: GenArray>(
             }
         }
 
-        step.optimal_state = x.0;
-        step.optimal_input =
-            u.0.zip(step.input_ranges)
-                .map(|(val, (lower, upper))| val.clamp(lower, upper));
+        step.optimal_state = x.into_array();
+        step.optimal_input = u
+            .into_array()
+            .zip(step.input_ranges)
+            .map(|(val, (lower, upper))| val.clamp(lower, upper));
 
         let y = step.state_cost * x + step.input_cost * u + step.const_cost;
         x = step.state_step * x + step.input_step * u + step.const_step;

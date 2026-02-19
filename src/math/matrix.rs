@@ -4,17 +4,41 @@ use core::ops::{
 };
 
 use crate::array::Concat;
-use crate::math::{Linear, Vector};
+use crate::math::Linear;
 use crate::{Array, ArrayInst, GenArray, array};
 
 /// A dense matrix with a fixed size, stored in row major order.
 pub struct Matrix<R: GenArray, C: GenArray>(pub Array<R, Array<C, f64>>);
 
+/// A column vector.
+pub type Vector<N> = Matrix<N, [(); 1]>;
+
+/// Constructor for the [`Vector`] type alias.
+#[expect(non_snake_case)]
+pub const fn Vector<N: GenArray>(elements: Array<N, f64>) -> Vector<N> {
+    let mut i = 0;
+    let mut v = Matrix(array::repeat([0.0]));
+    while i < N::LEN {
+        array::as_mut_slice(&mut v.0)[i] = [array::as_slice(&elements)[i]];
+        i += 1;
+    }
+    v
+}
+
 /// Constructs a matrix. This is equivalent to calling the `Matrix` constructor
 /// directly except it allows the type to infer the matrix type from the
 /// argument type.
-pub fn matrix<R: ArrayInst<Item = C>, C: ArrayInst<Item = f64>>(rows: R) -> Matrix<R::Gen, C::Gen> {
+pub const fn matrix<R: ArrayInst<Item = C>, C: ArrayInst<Item = f64>>(
+    rows: R,
+) -> Matrix<R::Gen, C::Gen> {
     Matrix(rows)
+}
+
+/// Constructs a vector. This is equivalent to calling the `Vector` constructor
+/// directly except it allows the type to infer the vector type from the
+/// argument type.
+pub const fn vector<A: ArrayInst<Item = f64>>(elements: A) -> Vector<A::Gen> {
+    Vector(elements)
 }
 
 impl<R: GenArray, C: GenArray> Matrix<R, C> {
@@ -30,24 +54,24 @@ impl<R: GenArray, C: GenArray> Matrix<R, C> {
 
     /// The `i`th row of `self`.
     pub fn row(self, r: usize) -> Vector<C> {
-        Vector(self.0.as_slice()[r])
+        Matrix(self.0.as_slice()[r].map(|e| [e]))
     }
 
     /// The `i`th column of `self`.
     pub fn col(self, j: usize) -> Vector<R> {
-        Vector(self.0.map(|row| row.as_slice()[j]))
+        Matrix(self.0.map(|row| [row.as_slice()[j]]))
     }
 
     /// Sets the `i`th row of `self`.
     pub fn set_row(&mut self, r: usize, row: Vector<C>) {
-        for (c, &value) in row.0.iter().enumerate() {
+        for (c, &[value]) in row.0.iter().enumerate() {
             self[(r, c)] = value;
         }
     }
 
     /// Sets the `i`th column of `self`.
     pub fn set_col(&mut self, c: usize, col: Vector<R>) {
-        for (r, &value) in col.0.iter().enumerate() {
+        for (r, &[value]) in col.0.iter().enumerate() {
             self[(r, c)] = value;
         }
     }
@@ -62,6 +86,13 @@ impl<R: GenArray, C: GenArray> Matrix<R, C> {
     /// Concatenates `self` with another matrix, vertically.
     pub fn concat_v<S: GenArray>(self, other: Matrix<S, C>) -> Matrix<Concat<R, S>, C> {
         Matrix(self.0.concat(other.0))
+    }
+}
+
+impl<N: GenArray> Vector<N> {
+    /// Turns `self` into an array of `f64`.
+    pub fn into_array(self) -> Array<N, f64> {
+        self.0.map(|[e]| e)
     }
 }
 
@@ -108,7 +139,7 @@ impl<N: GenArray> Matrix<N, N> {
         let mut i = 0;
         while i < N::LEN {
             let row = &mut array::as_mut_slice(&mut data.0)[i];
-            array::as_mut_slice(row)[i] = array::as_slice(&diag.0)[i];
+            array::as_mut_slice(row)[i] = array::as_slice(&diag.0)[i][0];
             i += 1;
         }
         data
@@ -189,33 +220,13 @@ impl<R: GenArray, C: GenArray> Mul<Matrix<R, C>> for f64 {
     }
 }
 
-impl<R: GenArray, C: GenArray> Mul<Vector<C>> for Matrix<R, C> {
-    type Output = Vector<R>;
-
-    fn mul(self, rhs: Vector<C>) -> Vector<R> {
-        Vector(R::from_fn(|i| self.row(i) * rhs))
-    }
-}
-
-impl<R: GenArray, C: GenArray> Mul<Matrix<R, C>> for Vector<R> {
-    type Output = Vector<C>;
-
-    fn mul(self, rhs: Matrix<R, C>) -> Vector<C> {
-        Vector(C::from_fn(|i| self * rhs.col(i)))
-    }
-}
-
-impl<N: GenArray> MulAssign<Matrix<N, N>> for Vector<N> {
-    fn mul_assign(&mut self, rhs: Matrix<N, N>) {
-        *self = *self * rhs;
-    }
-}
-
 impl<A: GenArray, B: GenArray, C: GenArray> Mul<Matrix<B, C>> for Matrix<A, B> {
     type Output = Matrix<A, C>;
 
     fn mul(self, rhs: Matrix<B, C>) -> Matrix<A, C> {
-        Matrix(A::from_fn(|i| (self.row(i) * rhs).0))
+        Matrix(A::from_fn(|i| {
+            C::from_fn(|j| (0..B::LEN).map(|k| self[(i, k)] * rhs[(k, j)]).sum())
+        }))
     }
 }
 
@@ -256,8 +267,22 @@ impl<R: GenArray, C: GenArray> Index<(usize, usize)> for Matrix<R, C> {
     }
 }
 
+impl<N: GenArray> Index<usize> for Vector<N> {
+    type Output = f64;
+
+    fn index(&self, index: usize) -> &f64 {
+        self.index((index, 0))
+    }
+}
+
 impl<R: GenArray, C: GenArray> IndexMut<(usize, usize)> for Matrix<R, C> {
     fn index_mut(&mut self, index: (usize, usize)) -> &mut f64 {
         &mut self.0.as_mut_slice()[index.0].as_mut_slice()[index.1]
+    }
+}
+
+impl<N: GenArray> IndexMut<usize> for Vector<N> {
+    fn index_mut(&mut self, index: usize) -> &mut f64 {
+        self.index_mut((index, 0))
     }
 }

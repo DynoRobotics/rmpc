@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use crate::math::{Linear, Matrix, Vector, matrix};
+use crate::math::{Linear, Matrix, Vector};
 use crate::{Array, ArrayInst, GenArray};
 
 /// Same as [`differentiate`], but multiplies the jacobian by a matrix.
@@ -14,8 +14,8 @@ fn differentiate_times<I: GenArray, D: GenArray, O: ArrayInst<Item = Dual<Vector
         grad: point_jac.row(i),
     });
     let output = function(input);
-    let value = Vector(output.map(|out| out.value));
-    let jacobian = Matrix(output.map(|out| out.grad.0));
+    let value = Matrix(output.map(|out| [out.value]));
+    let jacobian = Matrix(output.map(|out| out.grad.into_array()));
     (value, jacobian)
 }
 
@@ -45,8 +45,7 @@ pub fn eval_linearized<I: GenArray, O: ArrayInst<Item = Dual<Vector<[(); 1]>>>>(
     function: impl FnOnce(Array<I, Dual<Vector<[(); 1]>>>) -> O,
 ) -> Vector<O::Gen> {
     let delta = eval_point - lin_point;
-    let point_jac = matrix(delta.0.map(|val| [val]));
-    let (value, delta) = differentiate_times(lin_point, point_jac, function);
+    let (value, delta) = differentiate_times(lin_point, delta, function);
     value + delta.col(0)
 }
 

@@ -1,5 +1,5 @@
 use crate::array::repeat;
-use crate::math::{Linear, Matrix, Vector, matrix};
+use crate::math::{Linear, Matrix};
 use crate::{Array, ArrayInst, GenArray};
 
 /// A cholesky decomposition of a subset of the rows/columns of a matrix.
@@ -107,15 +107,6 @@ impl<N: GenArray> Cholesky<N> {
     pub fn solve<M: GenArray>(&self, rhs: &mut Matrix<N, M>) {
         self.lower_solve(rhs);
         self.upper_solve(rhs);
-    }
-
-    /// Solves for `x` in the equation `L * L^T * x = b`.
-    ///
-    /// This does not affect the elements in the inactive rows.
-    pub fn solve_vec(&self, rhs: Vector<N>) -> Vector<N> {
-        let mut mat = matrix([rhs.0]).transpose();
-        self.solve(&mut mat);
-        mat.col(0)
     }
 
     /// Computes `L^T * A`, modifying `A` in place.
