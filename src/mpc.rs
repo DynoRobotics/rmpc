@@ -255,16 +255,15 @@ pub fn iterate<S: GenArray, I: GenArray, C: GenArray>(
                 };
             } else {
                 // See if we are outside the input bounds, and if so, by how much.
-                let (near, far, bound) = if mod_input[input_i] > upper[input_i] {
-                    (upper[input_i], lower[input_i], Bound::Upper)
+                let (distance, bound) = if mod_input[input_i] > upper[input_i] {
+                    (mod_input[input_i] - upper[input_i], Bound::Upper)
                 } else if mod_input[input_i] < lower[input_i] {
-                    (lower[input_i], upper[input_i], Bound::Lower)
+                    (lower[input_i] - mod_input[input_i], Bound::Lower)
                 } else {
                     continue;
                 };
-                let relative_distance = (mod_input[input_i] - near) / (near - far);
 
-                let priority = -1.0 / relative_distance;
+                let priority = -1.0 / distance;
                 if priority > to_change.0 {
                     to_change = (priority, time_i, input_i, Some(bound));
                 }

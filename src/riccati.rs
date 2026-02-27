@@ -148,15 +148,25 @@ fn factorize<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [RiccatiStep<S, 
         let f_mat = cost_xx + tmp * step.state_step;
         step.h_mat = cost_xu + tmp * step.input_step;
 
+        for (i, bound) in step.active_set.iter_mut().enumerate() {
+            // Sanity check to release infinite bounds immediately
+            let (lower, upper) = step.input_ranges.as_slice()[i];
+            let value = match bound {
+                Some(Bound::Upper) => upper,
+                Some(Bound::Lower) => lower,
+                None => continue,
+            };
+            if !value.is_finite() {
+                *bound = None;
+                continue;
+            }
+
+            // Fixed inputs should not be included in `H`, so they are set to zero.
+            step.h_mat.set_col(i, Vector::ZERO);
+        }
+
         let g_mat = cost_uu + step.input_step.transpose() * p_mat * step.input_step;
         step.g_mat = Cholesky::factor(&g_mat, step.active_set.map(|b| b.is_none()));
-
-        // Only the non-fixed inputs should be included in H. Set the rest to zero.
-        for (i, bound) in step.active_set.iter().enumerate() {
-            if bound.is_some() {
-                step.h_mat.set_col(i, Vector::ZERO);
-            }
-        }
 
         step.k_mat = -step.h_mat.transpose();
         step.g_mat.solve(&mut step.k_mat);
@@ -231,9 +241,9 @@ fn forward_recursion<S: GenArray, I: GenArray, C: GenArray>(
                 let (lower, upper) = step.input_ranges.as_slice()[j];
 
                 let (amount, bound) = if value > upper {
-                    ((value - upper) / (upper - lower), Bound::Upper)
+                    (value - upper, Bound::Upper)
                 } else if value < lower {
-                    ((lower - value) / (upper - lower), Bound::Lower)
+                    (lower - value, Bound::Lower)
                 } else {
                     continue;
                 };
