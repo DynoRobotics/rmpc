@@ -2,15 +2,27 @@
 //! recursion.
 
 use crate::array::{Concat, repeat};
-use crate::math::{Cholesky, Linear, Matrix, Vector, linearize, vector};
+use crate::math::{Linear, Matrix, Vector, inv_no_pivot, linearize, vector};
 use crate::model::Model;
 use crate::{Array, ArrayInst, GenArray};
 
 /// The bound an input is currently constrained to.
+#[allow(missing_docs)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Bound {
+pub enum Bound {
     Upper,
     Lower,
+}
+
+/// A change to a constraint.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Change {
+    /// The index of the time step.
+    time: usize,
+    /// The index of the input.
+    input: usize,
+    /// The previous value of the bound.
+    previous: Option<Bound>,
 }
 
 /// The state of a single time step in the MPC solver.
@@ -46,7 +58,7 @@ pub struct RiccatiStep<S: GenArray, I: GenArray, C: GenArray> {
     // the value of interest.
     p_mat: Matrix<S, S>,
     h_mat: Matrix<S, I>,
-    g_mat: Cholesky<I>,
+    g_inv: Matrix<I, I>,
     k_mat: Matrix<I, S>,
     psi_vec: Vector<S>,
     k_vec: Vector<I>,
@@ -67,7 +79,7 @@ impl<S: GenArray, I: GenArray, C: GenArray> RiccatiStep<S, I, C> {
             input_cost: Linear::ZERO,
             const_cost: Linear::ZERO,
             p_mat: Linear::ZERO,
-            g_mat: Cholesky::EMPTY,
+            g_inv: Linear::ZERO,
             h_mat: Linear::ZERO,
             k_mat: Linear::ZERO,
             psi_vec: Linear::ZERO,
@@ -120,24 +132,52 @@ impl<S: GenArray, I: GenArray, C: GenArray> Default for RiccatiStep<S, I, C> {
 
 /// Performs a single iteration of the QP solver.
 ///
-/// Returns `true` if convergence has been reached. Note that due to rounding
-/// errors there is a risk of the solver not detecting convergence when it has
-/// reached the optimum.
-pub fn iterate<S: GenArray, I: GenArray, C: GenArray>(
+/// If the solution is suboptimal, then a struct representing a constraint that
+/// was changed is returned. It can be used with [`step_update`] to make the
+/// next iteration more efficient.
+///
+/// Note that due to rounding errors there is a risk of the solver not detecting
+/// convergence when it has reached the optimum.
+pub fn step<S: GenArray, I: GenArray, C: GenArray>(
     initial_state: Array<S, f64>,
     steps: &mut [RiccatiStep<S, I, C>],
-) -> bool {
-    factorize(steps);
+) -> Option<Change> {
+    factorize_upto(steps, steps.len() - 1);
     backward_recursion(steps);
     forward_recursion(steps, initial_state)
 }
 
-/// Performs the factorization algorithm.
-fn factorize<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [RiccatiStep<S, I, C>]) {
-    // To do: Possibly support a mayer term
-    let mut p_mat = Matrix::ZERO;
+/// Performs a single iteration of the QP solver. This is similar to [`step`]
+/// except more efficient as it performs an incremental update instead of
+/// recomputing everything from scratch.
+///
+/// Note that the list of steps must not have been altered since the last call
+/// to [`step`], as that violates the assumptions of this algorithm, likely
+/// resulting in nonsensical results.
+pub fn step_update<S: GenArray, I: GenArray, C: GenArray>(
+    initial_state: Array<S, f64>,
+    steps: &mut [RiccatiStep<S, I, C>],
+    last_change: Change,
+) -> Option<Change> {
+    factorize_upto(steps, last_change.time);
+    backward_recursion(steps);
+    forward_recursion(steps, initial_state)
+}
 
-    for step in steps.iter_mut().rev() {
+/// Performs the factorization algorithm. Assumes that the steps after `last`
+/// have already been computed.
+fn factorize_upto<S: GenArray, I: GenArray, C: GenArray>(
+    steps: &mut [RiccatiStep<S, I, C>],
+    last: usize,
+) {
+    // To do: Possibly support a mayer term
+    let mut p_mat = if last == steps.len() - 1 {
+        Matrix::ZERO
+    } else {
+        steps[last].p_mat
+    };
+
+    for step in steps[..=last].iter_mut().rev() {
         step.p_mat = p_mat;
 
         let cost_xx = step.state_cost.transpose() * step.state_cost;
@@ -147,6 +187,8 @@ fn factorize<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [RiccatiStep<S, 
         let tmp = step.state_step.transpose() * p_mat;
         let f_mat = cost_xx + tmp * step.state_step;
         step.h_mat = cost_xu + tmp * step.input_step;
+
+        let mut g_mat = cost_uu + step.input_step.transpose() * p_mat * step.input_step;
 
         for (i, bound) in step.active_set.iter_mut().enumerate() {
             // Sanity check to release infinite bounds immediately
@@ -161,15 +203,14 @@ fn factorize<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [RiccatiStep<S, 
                 continue;
             }
 
-            // Fixed inputs should not be included in `H`, so they are set to zero.
+            // Fixed inputs should not be included in `G` or `H`, so they are set to zero.
             step.h_mat.set_col(i, Vector::ZERO);
+            g_mat.set_col(i, Vector::ZERO);
+            g_mat.set_row(i, Vector::ZERO);
         }
 
-        let g_mat = cost_uu + step.input_step.transpose() * p_mat * step.input_step;
-        step.g_mat = Cholesky::factor(&g_mat, step.active_set.map(|b| b.is_none()));
-
-        step.k_mat = -step.h_mat.transpose();
-        step.g_mat.solve(&mut step.k_mat);
+        step.g_inv = inv_no_pivot(g_mat);
+        step.k_mat = -step.g_inv * step.h_mat.transpose();
 
         p_mat = f_mat + step.h_mat * step.k_mat;
     }
@@ -195,14 +236,8 @@ fn backward_recursion<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [Riccat
         let cv = step.input_cost * const_input + step.const_cost;
         let tmp = step.psi_vec - step.p_mat * av;
 
-        step.k_vec =
-            step.input_step.transpose() * tmp - step.input_cost.transpose() * step.const_cost;
-        step.g_mat.solve(&mut step.k_vec);
-        for (i, active) in step.g_mat.active().iter().enumerate() {
-            if !active {
-                step.k_vec[i] = 0.0;
-            }
-        }
+        step.k_vec = step.g_inv
+            * (step.input_step.transpose() * tmp - step.input_cost.transpose() * step.const_cost);
 
         psi_vec = step.state_step.transpose() * tmp
             - step.state_cost.transpose() * cv
@@ -211,13 +246,12 @@ fn backward_recursion<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [Riccat
 }
 
 /// Performs the forward recursion algorithm and updates a single constraint if
-/// the solution is suboptimal or infeasible.
-///
-/// Returns `true` if optimality has been reached.
+/// the solution is suboptimal or infeasible. Returns a struct containing
+/// information about the constraint that was changed.
 fn forward_recursion<S: GenArray, I: GenArray, C: GenArray>(
     steps: &mut [RiccatiStep<S, I, C>],
     initial_state: Array<S, f64>,
-) -> bool {
+) -> Option<Change> {
     let mut x = vector(initial_state);
 
     let mut worst_violation = (0.0, 0, 0, Bound::Lower);
@@ -281,17 +315,25 @@ fn forward_recursion<S: GenArray, I: GenArray, C: GenArray>(
 
     // Remove a constraint binding in the wrong direction
     if worst_dual.0 > 0.0 {
-        steps[worst_dual.1].active_set.as_mut_slice()[worst_dual.2] = None;
-        return false;
+        let previous = steps[worst_dual.1].active_set.as_mut_slice()[worst_dual.2].take();
+        return Some(Change {
+            time: worst_dual.1,
+            input: worst_dual.2,
+            previous,
+        });
     }
 
     // Add a constraint that has been violated
     if worst_violation.0 > 0.0 {
         steps[worst_violation.1].active_set.as_mut_slice()[worst_violation.2] =
             Some(worst_violation.3);
-        return false;
+        return Some(Change {
+            time: worst_violation.1,
+            input: worst_violation.2,
+            previous: None,
+        });
     }
 
     // All KKT conditions are satisified, the solution is optimal.
-    true
+    None
 }
