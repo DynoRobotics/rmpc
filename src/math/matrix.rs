@@ -96,6 +96,13 @@ impl<N: GenArray> Vector<N> {
     }
 }
 
+impl Matrix<[(); 1], [(); 1]> {
+    /// Turns `self` into an array of `f64`.
+    pub fn into_scalar(self) -> f64 {
+        self.0[0][0]
+    }
+}
+
 impl<R: GenArray, C: GenArray, D: GenArray> Matrix<R, Concat<C, D>> {
     /// Splits `self` into two matrices, horizontally.
     pub fn split_h(self) -> (Matrix<R, C>, Matrix<R, D>) {

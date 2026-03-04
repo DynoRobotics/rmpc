@@ -1,7 +1,7 @@
 //! Rewrite of the [`mpc`](crate::mpc) module using a standard Riccati
 //! recursion.
 
-use crate::array::{Concat, repeat};
+use crate::array::{Concat, from_fn, repeat};
 use crate::math::{Linear, Matrix, Vector, inv_no_pivot, linearize, vector};
 use crate::model::Model;
 use crate::{Array, ArrayInst, GenArray};
@@ -143,7 +143,18 @@ pub fn step<S: GenArray, I: GenArray, C: GenArray>(
     steps: &mut [RiccatiStep<S, I, C>],
 ) -> Option<Change> {
     factorize_upto(steps, steps.len() - 1);
-    backward_recursion(steps);
+    backward_recursion_upto(steps, steps.len() - 1);
+    forward_recursion(steps, initial_state)
+}
+
+/// Same as [`step_update`] but recomputes the updated part from scratch.
+pub fn step_old_update<S: GenArray, I: GenArray, C: GenArray>(
+    initial_state: Array<S, f64>,
+    steps: &mut [RiccatiStep<S, I, C>],
+    last_change: Change,
+) -> Option<Change> {
+    factorize_upto(steps, last_change.time);
+    backward_recursion_upto(steps, last_change.time);
     forward_recursion(steps, initial_state)
 }
 
@@ -159,8 +170,8 @@ pub fn step_update<S: GenArray, I: GenArray, C: GenArray>(
     steps: &mut [RiccatiStep<S, I, C>],
     last_change: Change,
 ) -> Option<Change> {
-    factorize_upto(steps, last_change.time);
-    backward_recursion(steps);
+    update_factorization(steps, last_change);
+    backward_recursion_upto(steps, last_change.time);
     forward_recursion(steps, initial_state)
 }
 
@@ -216,12 +227,101 @@ fn factorize_upto<S: GenArray, I: GenArray, C: GenArray>(
     }
 }
 
-/// Performs the backward recursion algorithm.
-fn backward_recursion<S: GenArray, I: GenArray, C: GenArray>(steps: &mut [RiccatiStep<S, I, C>]) {
-    // To do: Possibly support a mayer term
-    let mut psi_vec = Vector::ZERO;
+fn update_factorization<S: GenArray, I: GenArray, C: GenArray>(
+    steps: &mut [RiccatiStep<S, I, C>],
+    change: Change,
+) {
+    let t = change.time;
+    let i = change.input;
 
-    for step in steps.iter_mut().rev() {
+    let step = &mut steps[t];
+
+    let adding = step.active_set.as_slice()[i].is_some();
+    let alpha = if adding { 1.0 } else { -1.0 };
+    let pi = Vector(from_fn(|j| if i == j { 1.0 } else { 0.0 }));
+
+    let b = step.input_step.col(i);
+    let d = step.input_cost.col(i);
+
+    let g0 = d.transpose() * d + b.transpose() * step.p_mat * b;
+    let h = step.state_cost.transpose() * d + step.state_step.transpose() * step.p_mat * b;
+
+    let mut g = step.input_cost.transpose() * d + step.input_step.transpose() * step.p_mat * b;
+    for (i, bound) in step.active_set.iter().enumerate() {
+        if bound.is_some() {
+            g[i] = 0.0;
+        }
+    }
+    if !adding {
+        g[i] -= g0.into_scalar();
+    }
+
+    if adding {
+        // Update G_inv
+        let col = step.g_inv.col(change.input);
+        let cell = col[change.input];
+        step.g_inv -= col / cell * col.transpose();
+
+        step.g_inv.set_col(change.input, Vector::ZERO);
+        step.g_inv.set_row(change.input, Vector::ZERO);
+
+        // Update H
+        step.h_mat.set_col(change.input, Vector::ZERO);
+    }
+
+    let numerator = h - step.h_mat * (step.g_inv * g);
+    let denominator = (g0 - g.transpose() * step.g_inv * g).into_scalar();
+
+    let mut v_vec = numerator * (1.0 / libm::sqrt(denominator));
+    step.k_mat -= (alpha / denominator) * (step.g_inv * g - pi) * numerator.transpose();
+
+    if !adding {
+        // Update G_inv
+        let tmp = step.g_inv * g - pi;
+        step.g_inv += (1.0 / denominator) * tmp * tmp.transpose();
+
+        // Update H
+        step.h_mat.set_col(i, h);
+    }
+
+    // Propagate the update to earlier time steps
+    for step in steps[..t].iter_mut().rev() {
+        step.p_mat += alpha * v_vec * v_vec.transpose();
+
+        let a = step.state_step.transpose() * v_vec;
+        let mut b = step.input_step.transpose() * v_vec;
+
+        for (i, bound) in step.active_set.iter().enumerate() {
+            if bound.is_some() {
+                b[i] = 0.0;
+            }
+        }
+
+        let tmp = step.g_inv * b;
+        step.g_inv -= tmp / (alpha + (b.transpose() * tmp).into_scalar()) * tmp.transpose();
+
+        step.h_mat += alpha * a * b.transpose();
+
+        let tmp = a + step.k_mat.transpose() * b;
+        v_vec = libm::sqrt(1.0 - alpha * (b.transpose() * step.g_inv * b).into_scalar()) * tmp;
+
+        step.k_mat -= alpha * (step.g_inv * b) * tmp.transpose();
+    }
+}
+
+/// Performs the backward recursion algorithm.
+fn backward_recursion_upto<S: GenArray, I: GenArray, C: GenArray>(
+    steps: &mut [RiccatiStep<S, I, C>],
+    last: usize,
+) {
+    // To do: Possibly support a mayer term
+    let mut psi_vec = if last == steps.len() - 1 {
+        Vector::ZERO
+    } else {
+        steps[last].psi_vec
+    };
+
+    for step in steps[..=last].iter_mut().rev() {
         step.psi_vec = psi_vec;
 
         let const_input = vector(step.active_set.zip(step.input_ranges).map(

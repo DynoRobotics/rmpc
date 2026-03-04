@@ -64,7 +64,7 @@ pub use rmpc_derive::GenArray;
 /// * The struct has `#[repr(C)]`
 /// * The type has exactly one generic, and it doesn't have any bounds.
 /// * All fields are of that generic type.
-pub trait GenArray {
+pub trait GenArray: Copy {
     /// The actual array type, for some `T`.
     ///
     /// The [`Array`] type alias makes accessing this slightly easier.
