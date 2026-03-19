@@ -142,7 +142,7 @@ pub fn constr_mat<S: GenArray, I: GenArray, C: GenArray>(
     let ineq_iter = (0..steps.len()).flat_map(move |i| {
         (0..I::LEN).map(move |y| {
             let y_offset = steps.len() * S::LEN + i * I::LEN;
-            let x_offset = i * (S::LEN + I::LEN);
+            let x_offset = i * (S::LEN + I::LEN) + S::LEN;
             (y_offset + y, x_offset + y, 1.0)
         })
     });
@@ -166,7 +166,8 @@ pub fn constr_mat<S: GenArray, I: GenArray, C: GenArray>(
 /// \  ul_(n-1)  uh_(n-1) /
 /// ```
 ///
-/// where the left column is the lower bounds (`bl`) and the right column the upper bounds (`bu`).
+/// where the left column is the lower bounds (`bl`) and the right column the
+/// upper bounds (`bh`).
 pub fn constr_vec<S: GenArray, I: GenArray, C: GenArray>(
     steps: &[RiccatiStep<S, I, C>],
     initial_state: Array<S, f64>,
