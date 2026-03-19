@@ -6,6 +6,8 @@ use crate::math::{Linear, Matrix, Vector, inv_no_pivot, linearize, vector};
 use crate::model::Model;
 use crate::{Array, ArrayInst, GenArray};
 
+pub mod export;
+
 /// The bound an input is currently constrained to.
 #[allow(missing_docs)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
