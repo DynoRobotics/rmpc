@@ -1,5 +1,6 @@
 with import <nixpkgs> {};
 
 mkShell {
-  LD_LIBRARY_PATH = lib.makeLibraryPath (with xorg; [ libX11 libxkbcommon libXi libGL ]);
+  packages = [ gnuplot ];
+  LD_LIBRARY_PATH = lib.makeLibraryPath [ libX11 libxkbcommon libXi libGL ];
 }
