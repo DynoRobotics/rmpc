@@ -269,6 +269,7 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray>(
         let cell = col[change.input];
         step.g_inv -= col / cell * col.transpose();
 
+        // Get rid of any cancellation errors
         step.g_inv.set_col(change.input, Vector::ZERO);
         step.g_inv.set_row(change.input, Vector::ZERO);
 
@@ -282,7 +283,10 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray>(
     let mut v_vec = numerator * (1.0 / libm::sqrt(denominator));
     step.k_mat -= (alpha / denominator) * (step.g_inv * g - pi) * numerator.transpose();
 
-    if !adding {
+    if adding {
+        // Get rid of any cancellation errors
+        step.k_mat.set_row(change.input, Vector::ZERO);
+    } else {
         // Update G_inv
         let tmp = step.g_inv * g - pi;
         step.g_inv += (1.0 / denominator) * tmp * tmp.transpose();
