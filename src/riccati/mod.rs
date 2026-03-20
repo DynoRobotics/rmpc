@@ -226,6 +226,11 @@ fn factorize_upto<S: GenArray, I: GenArray, C: GenArray>(
         step.k_mat = -step.g_inv * step.h_mat.transpose();
 
         p_mat = f_mat + step.h_mat * step.k_mat;
+
+        // Due to rounding errors, we can't be sure that the comptuation above yields a
+        // symmetric matrix. These rounding errors seem to grow uncontrollably in some
+        // cases, so to avoid that we will enforce symmetry.
+        p_mat = (p_mat + p_mat.transpose()) * 0.5;
     }
 }
 
