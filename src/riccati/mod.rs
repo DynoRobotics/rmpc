@@ -3,7 +3,7 @@
 
 use crate::array::{Concat, from_fn, repeat};
 use crate::math::{Linear, Matrix, Vector, inv_no_pivot, linearize, vector};
-use crate::model::Model;
+use crate::model::Discrete;
 use crate::{Array, ArrayInst, GenArray};
 
 pub mod export;
@@ -67,7 +67,7 @@ pub struct RiccatiStep<S: GenArray, I: GenArray, C: GenArray> {
 }
 
 impl<S: GenArray, I: GenArray, C: GenArray> RiccatiStep<S, I, C> {
-    /// Creates an instance of [`MpcStep`] with all matrices set to zero.
+    /// Creates an instance of [`RiccatiStep`] with all matrices set to zero.
     pub const fn new() -> Self {
         Self {
             optimal_state: repeat(0.0),
@@ -100,7 +100,7 @@ impl<S: GenArray, I: GenArray, C: GenArray> RiccatiStep<S, I, C> {
         input: Array<I, f64>,
         time: usize,
     ) where
-        M: Model<State = S, Input = I, Cost = C>,
+        M: Discrete<State = S, Input = I, Cost = C>,
     {
         let point = vector(state.concat(input));
 

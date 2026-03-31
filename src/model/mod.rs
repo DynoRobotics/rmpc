@@ -5,17 +5,17 @@ mod continuous;
 use crate::math::{Dual, Linear, Zero};
 use crate::{Array, ArrayInst, GenArray};
 
-pub use self::continuous::{Continuous, ContinuousDiff, RungeKutta4, RungeKutta4Diff};
+pub use self::continuous::{Continuous, RungeKutta4};
 
 /// An explicit non-linear discrete time model on the form
-/// `x[k+1] = time_step(x[k], u[k])`.
+/// `x[k+1] = time_step(x[k], u[k], k)`.
 ///
 /// Most systems are continuous, so instead of implementing this directly it is
 /// recommended to implement [`Continuous`] and use [`discretize`] to turn it
 /// into a discrete time model.
 ///
 /// [`discretize`]: Continuous::discretize
-pub trait Model {
+pub trait Discrete {
     /// The state of the system at some time step.
     type State: GenArray;
     /// The input at some time step.
@@ -68,5 +68,33 @@ pub trait Model {
         let input = input.map(Dual::from);
         let cost = self.cost_vector::<Zero>(time, state, input);
         cost.map(Dual::value)
+    }
+}
+
+impl<M: Discrete> Discrete for &M {
+    type State = M::State;
+    type Input = M::Input;
+    type Cost = M::Cost;
+
+    fn time_step<D: Linear>(
+        &self,
+        time: usize,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::State, Dual<D>> {
+        M::time_step(self, time, state, input)
+    }
+
+    fn cost_vector<D: Linear>(
+        &self,
+        time: usize,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::Cost, Dual<D>> {
+        M::cost_vector(self, time, state, input)
+    }
+
+    fn input_ranges(&self, time: usize) -> Array<Self::Input, (f64, f64)> {
+        M::input_ranges(self, time)
     }
 }

@@ -4,7 +4,7 @@ use std::f64::consts::{PI, TAU};
 
 use macroquad::prelude::*;
 use rmpc::math::{Dual, Linear};
-use rmpc::model::{Continuous, Model};
+use rmpc::model::{Continuous, Discrete};
 use rmpc::mpc::{self, MpcStep};
 use rmpc::{FieldNames, GenArray};
 
@@ -37,10 +37,11 @@ impl Continuous for Crane {
     type Input = Input<()>;
     type Cost = [(); 3];
 
-    fn state_deriv<D: Linear>(
+    fn update<D: Linear>(
         &self,
         _time: f64,
         _time_idx: usize,
+        _dt: f64,
         state: State<Dual<D>>,
         input: Input<Dual<D>>,
     ) -> State<Dual<D>> {
@@ -66,6 +67,7 @@ impl Continuous for Crane {
         &self,
         _time: f64,
         _time_idx: usize,
+        _dt: f64,
         state: State<Dual<D>>,
         input: Input<Dual<D>>,
     ) -> [Dual<D>; 3] {
@@ -78,7 +80,7 @@ impl Continuous for Crane {
         ]
     }
 
-    fn input_ranges(&self, _time: f64) -> Input<(f64, f64)> {
+    fn input_ranges(&self, _time: f64, _time_idx: usize, _dt: f64) -> Input<(f64, f64)> {
         Input {
             target_vel: (-self.max_vel, self.max_vel),
         }

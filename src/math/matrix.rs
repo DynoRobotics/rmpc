@@ -13,7 +13,7 @@ pub struct Matrix<R: GenArray, C: GenArray>(pub Array<R, Array<C, f64>>);
 /// A column vector.
 pub type Vector<N> = Matrix<N, [(); 1]>;
 
-/// Constructor for the [`Vector`] type alias.
+/// Constructor for the [`Vector`](tyalias@Vector) type alias.
 #[expect(non_snake_case)]
 pub const fn Vector<N: GenArray>(elements: Array<N, f64>) -> Vector<N> {
     let mut i = 0;

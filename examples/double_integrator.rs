@@ -35,10 +35,11 @@ impl Continuous for DoubleIntegrator {
     type Cost = [(); 3];
 
     /// The derivative of the state given the current state and input.
-    fn state_deriv<D: Linear>(
+    fn update<D: Linear>(
         &self,
         _time: f64,
         _time_idx: usize,
+        _dt: f64,
         state: State<Dual<D>>,
         input: Input<Dual<D>>,
     ) -> State<Dual<D>> {
@@ -54,6 +55,7 @@ impl Continuous for DoubleIntegrator {
         &self,
         _time: f64,
         _time_idx: usize,
+        _dt: f64,
         state: State<Dual<D>>,
         input: Input<Dual<D>>,
     ) -> [Dual<D>; 3] {
@@ -65,7 +67,7 @@ impl Continuous for DoubleIntegrator {
     }
 
     /// Bounds for each input signal.
-    fn input_ranges(&self, _time: f64) -> Input<(f64, f64)> {
+    fn input_ranges(&self, _time: f64, _time_idx: usize, _dt: f64) -> Input<(f64, f64)> {
         Input { acc: (-1.0, 1.0) }
     }
 }

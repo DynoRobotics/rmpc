@@ -4,7 +4,7 @@ use core::iter::zip;
 
 use crate::array::{ArrayInst, Concat, from_fn, repeat};
 use crate::math::{Linear, Matrix, Vector, inv_no_pivot, linearize, vector};
-use crate::model::Model;
+use crate::model::Discrete;
 use crate::{Array, GenArray};
 
 /// The bound an input is currently constrained to.
@@ -78,7 +78,7 @@ impl<S: GenArray, I: GenArray, C: GenArray> MpcStep<S, I, C> {
         input: Array<I, f64>,
         time: usize,
     ) where
-        M: Model<State = S, Input = I, Cost = C>,
+        M: Discrete<State = S, Input = I, Cost = C>,
     {
         let point = vector(state.concat(input));
 
