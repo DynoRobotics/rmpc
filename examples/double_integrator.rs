@@ -133,8 +133,8 @@ fn main() -> std::io::Result<()> {
         plot = plot.values(PlotType::Stairs, name, values);
     }
 
-    plot.plot_png(format!(
-        "{}/examples/{}.png",
+    plot.plot_svg(format!(
+        "{}/examples/{}.svg",
         env!("CARGO_MANIFEST_DIR"),
         env!("CARGO_BIN_NAME")
     ))

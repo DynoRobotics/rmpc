@@ -63,8 +63,8 @@ impl Plot {
         self
     }
 
-    /// Creates a plot of the signals using Gnuplot, saving them as a PNG.
-    pub fn plot_png(self, path: impl AsRef<Path>) -> Result<()> {
+    /// Creates a plot of the signals using Gnuplot, saving them as an SVG.
+    pub fn plot_svg(self, path: impl AsRef<Path>) -> Result<()> {
         let mut command = Command::new("gnuplot")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -73,7 +73,11 @@ impl Plot {
         let mut stdin = command.stdin.take().unwrap();
 
         let num_plots = self.series.len();
-        writeln!(stdin, "set terminal png size 700, {}", 200 * num_plots)?;
+        writeln!(
+            stdin,
+            "set terminal svg background rgb 'white' size 700, {height}",
+            height = 200 * num_plots,
+        )?;
         writeln!(stdin, "set multiplot layout {num_plots},1")?;
 
         writeln!(stdin, "set tmargin 1")?;
