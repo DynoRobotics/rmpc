@@ -1,7 +1,7 @@
 //! An example using an unstable double integrator.
 
 use rmpc::math::{Dual, Linear};
-use rmpc::model::Continuous;
+use rmpc::model::{Bounded, Continuous};
 use rmpc::riccati::{self, RiccatiStep};
 use rmpc::{ArrayInst, FieldNames, GenArray};
 
@@ -33,6 +33,7 @@ impl Continuous for DoubleIntegrator {
     type State = State<()>;
     type Input = Input<()>;
     type Cost = [(); 3];
+    type Bounds = [(); 1];
 
     /// The derivative of the state given the current state and input.
     fn update<D: Linear>(
@@ -69,6 +70,17 @@ impl Continuous for DoubleIntegrator {
     /// Bounds for each input signal.
     fn input_ranges(&self, _time: f64, _time_idx: usize, _dt: f64) -> Input<(f64, f64)> {
         Input { acc: (-1.0, 1.0) }
+    }
+
+    fn bounds<D: Linear>(
+        &self,
+        _time: f64,
+        _idx: usize,
+        _dt: f64,
+        state: State<Dual<D>>,
+        _input: Input<Dual<D>>,
+    ) -> [Bounded<D>; 1] {
+        [Bounded::new(state.vel, -3.0..3.0, 100.0)]
     }
 }
 

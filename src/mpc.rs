@@ -2,8 +2,8 @@
 
 use core::iter::zip;
 
-use crate::array::{ArrayInst, Concat, from_fn, repeat};
-use crate::math::{Linear, Matrix, Vector, inv_no_pivot, linearize, vector};
+use crate::array::{ArrayInst, Concat, repeat};
+use crate::math::{Dual, Linear, Matrix, Vector, Zero, inv_no_pivot, linearize, vector};
 use crate::model::Discrete;
 use crate::{Array, GenArray};
 
@@ -15,40 +15,40 @@ enum Bound {
 }
 
 /// The state of a single time step in the MPC solver.
-pub struct MpcStep<S: GenArray, I: GenArray, C: GenArray> {
+pub struct MpcStep<S: GenArray, I: GenArray, C: GenArray, B: GenArray> {
     /// The state found by the solver.
     pub optimal_state: Array<S, f64>,
     /// The input found by the solver.
     pub optimal_input: Array<I, f64>,
 
     /// The allowed range of each input.
-    input_ranges: Array<I, (f64, f64)>,
+    input_ranges: Array<Concat<I, B>, (f64, f64)>,
 
     /// The current active set.
-    active_set: Array<I, Option<Bound>>,
+    active_set: Array<Concat<I, B>, Option<Bound>>,
 
     /// The `A` matrix in the time step `A*x + B*u + a`.
     state_step: Matrix<S, S>,
     /// The `B` matrix in the time step `A*x + B*u + a`.
-    input_step: Matrix<S, I>,
+    input_step: Matrix<S, Concat<I, B>>,
     /// The `a` vector in the time step `A*x + B*u + a`.
     const_step: Vector<S>,
 
     /// The `C` matrix in the cost function `|C*x + D*u + c|^2`.
-    state_cost: Matrix<C, S>,
+    state_cost: Matrix<Concat<C, B>, S>,
     /// The `D` matrix in the cost function `|C*x + D*u + c|^2`.
-    input_cost: Matrix<C, I>,
+    input_cost: Matrix<Concat<C, B>, Concat<I, B>>,
     /// The `c` vector in the cost function `|C*x + D*u + c|^2`.
-    const_cost: Vector<C>,
+    const_cost: Vector<Concat<C, B>>,
 
     /// Feedback from the state to a vector with the input values for unconstrained
     /// inputs and the dual variable for constrained inputs.
-    state_mod_feedback: Matrix<I, S>,
+    state_mod_feedback: Matrix<Concat<I, B>, S>,
     /// The constant term for the modified feedback vector.
-    const_mod_feedback: Vector<I>,
+    const_mod_feedback: Vector<Concat<I, B>>,
 }
 
-impl<S: GenArray, I: GenArray, C: GenArray> MpcStep<S, I, C> {
+impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
     /// Creates an instance of [`MpcStep`] with all matrices set to zero.
     pub const fn new() -> Self {
         Self {
@@ -78,13 +78,21 @@ impl<S: GenArray, I: GenArray, C: GenArray> MpcStep<S, I, C> {
         input: Array<I, f64>,
         time: usize,
     ) where
-        M: Discrete<State = S, Input = I, Cost = C>,
+        M: Discrete<State = S, Input = I, Cost = C, Bounds = B>,
     {
-        let point = vector(state.concat(input));
+        // The derivative of the cost function is constant with respect to the slack
+        // variables, so it doesn't matter what value they have during linearization.
+        //
+        // To do: Avoid linearizing with respect to the slack variables. The derivatives
+        // are trivial so entering them manually would avoid putting them inside the AD
+        // gradients, possibly saving a bit of computation time.
+        let zeroed_slack: Array<B, f64> = repeat(0.0);
+        let point = vector(state.concat(input.concat(zeroed_slack)));
 
-        self.input_ranges = model.input_ranges(time);
+        let bounds = model.bounds::<Zero>(time, state.map(Dual::from), input.map(Dual::from));
+        self.input_ranges = Concat(model.input_ranges(time), bounds.map(|b| (b.min, b.max)));
 
-        let (jac_step, const_step) = linearize(point, |Concat(state, input)| {
+        let (jac_step, const_step) = linearize(point, |Concat(state, Concat(input, _slack))| {
             model.time_step(time, state, input)
         });
         let (state_step, input_step) = jac_step.split_h();
@@ -93,8 +101,13 @@ impl<S: GenArray, I: GenArray, C: GenArray> MpcStep<S, I, C> {
         self.input_step = input_step;
         self.const_step = const_step;
 
-        let (jac_cost, const_cost) = linearize(point, |Concat(state, input)| {
-            model.cost_vector(time, state, input)
+        let (jac_cost, const_cost) = linearize(point, |Concat(state, Concat(input, slack))| {
+            let cost = model.cost_vector(time, state, input);
+            let violation_cost = model
+                .bounds(time, state, input)
+                .zip(slack)
+                .map(|(b, r)| (b.value - r) * b.weight);
+            Concat(cost, violation_cost)
         });
         let (state_cost, input_cost) = jac_cost.split_h();
 
@@ -104,7 +117,7 @@ impl<S: GenArray, I: GenArray, C: GenArray> MpcStep<S, I, C> {
     }
 }
 
-impl<S: GenArray, I: GenArray, C: GenArray> Clone for MpcStep<S, I, C> {
+impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> Clone for MpcStep<S, I, C, B> {
     fn clone(&self) -> Self {
         Self {
             optimal_state: self.optimal_state,
@@ -123,7 +136,7 @@ impl<S: GenArray, I: GenArray, C: GenArray> Clone for MpcStep<S, I, C> {
     }
 }
 
-impl<S: GenArray, I: GenArray, C: GenArray> Default for MpcStep<S, I, C> {
+impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> Default for MpcStep<S, I, C, B> {
     fn default() -> Self {
         Self::new()
     }
@@ -134,9 +147,9 @@ impl<S: GenArray, I: GenArray, C: GenArray> Default for MpcStep<S, I, C> {
 /// Returns `true` if convergence has been reached. Note that due to rounding
 /// errors there is a risk of the solver not detecting convergence when it has
 /// reached the optimum.
-pub fn iterate<S: GenArray, I: GenArray, C: GenArray>(
+pub fn iterate<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
-    steps: &mut [MpcStep<S, I, C>],
+    steps: &mut [MpcStep<S, I, C, B>],
 ) -> bool {
     // The optimal cost given some state is given by the formula
     // ```
@@ -271,7 +284,11 @@ pub fn iterate<S: GenArray, I: GenArray, C: GenArray>(
         }
 
         step.optimal_state = state.into_array();
-        step.optimal_input = from_fn(|i| mod_input[i].clamp(lower[i], upper[i]));
+        step.optimal_input = mod_input
+            .into_array()
+            .zip(step.input_ranges)
+            .0
+            .map(|(value, (lower, upper))| value.clamp(lower, upper));
 
         // Continue the trajectory using this input.
         state = step.state_step * state + step.input_step * mod_input + step.const_step;

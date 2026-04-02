@@ -4,7 +4,7 @@ use std::f64::consts::{PI, TAU};
 
 use macroquad::prelude::*;
 use rmpc::math::{Dual, Linear};
-use rmpc::model::{Continuous, Discrete};
+use rmpc::model::{Bounded, Continuous, Discrete};
 use rmpc::mpc::{self, MpcStep};
 use rmpc::{FieldNames, GenArray};
 
@@ -36,6 +36,7 @@ impl Continuous for Crane {
     type State = State<()>;
     type Input = Input<()>;
     type Cost = [(); 3];
+    type Bounds = [(); 1];
 
     fn update<D: Linear>(
         &self,
@@ -84,6 +85,22 @@ impl Continuous for Crane {
         Input {
             target_vel: (-self.max_vel, self.max_vel),
         }
+    }
+
+    fn bounds<D: Linear>(
+        &self,
+        _time: f64,
+        _idx: usize,
+        _dt: f64,
+        state: State<Dual<D>>,
+        _input: Input<Dual<D>>,
+    ) -> [Bounded<D>; 1] {
+        let max_angle = 10_f64.to_radians();
+        [Bounded::new(
+            state.load_angle,
+            -max_angle..max_angle,
+            10_000.0,
+        )]
     }
 }
 

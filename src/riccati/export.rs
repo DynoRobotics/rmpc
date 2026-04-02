@@ -34,15 +34,15 @@ pub struct SparseIter<I> {
 /// |                           C_(n-1)^T C_(n-1)  C_(n-1)^T D_(n-1)  |
 ///  \                          D_(n-1)^T C_(n-1)  D_(n-1)^T D_(n-1) /
 /// ```
-pub fn cost_mat<S: GenArray, I: GenArray, C: GenArray>(
-    steps: &[RiccatiStep<S, I, C>],
+pub fn cost_mat<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+    steps: &[RiccatiStep<S, I, C, B>],
 ) -> SparseIter<impl Iterator<Item = (usize, usize, f64)>> {
-    let size = steps.len() * (S::LEN + I::LEN);
+    let size = steps.len() * (S::LEN + I::LEN + B::LEN);
 
     let iter = steps.iter().enumerate().flat_map(|(i, step)| {
-        (0..S::LEN + I::LEN).flat_map(move |y| {
-            (0..S::LEN + I::LEN).map(move |x| {
-                let offset = i * (S::LEN + I::LEN);
+        (0..S::LEN + I::LEN + B::LEN).flat_map(move |y| {
+            (0..S::LEN + I::LEN + B::LEN).map(move |x| {
+                let offset = i * (S::LEN + I::LEN + B::LEN);
 
                 let get_col = |i| {
                     if i < S::LEN {
@@ -78,11 +78,11 @@ pub fn cost_mat<S: GenArray, I: GenArray, C: GenArray>(
 /// |  C_(n-1)^T c_0  |
 ///  \ D_(n-1)^T c_0 /
 /// ```
-pub fn cost_vec<S: GenArray, I: GenArray, C: GenArray>(
-    steps: &[RiccatiStep<S, I, C>],
+pub fn cost_vec<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+    steps: &[RiccatiStep<S, I, C, B>],
 ) -> impl Iterator<Item = f64> {
     steps.iter().flat_map(|step| {
-        (0..S::LEN + I::LEN).map(move |y| {
+        (0..S::LEN + I::LEN + B::LEN).map(move |y| {
             let col = if y < S::LEN {
                 step.state_cost.col(y)
             } else {
@@ -108,10 +108,10 @@ pub fn cost_vec<S: GenArray, I: GenArray, C: GenArray>(
 /// |                                         I            |
 ///  \                                                  I /
 /// ```
-pub fn constr_mat<S: GenArray, I: GenArray, C: GenArray>(
-    steps: &[RiccatiStep<S, I, C>],
+pub fn constr_mat<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+    steps: &[RiccatiStep<S, I, C, B>],
 ) -> SparseIter<impl Iterator<Item = (usize, usize, f64)>> {
-    let size = steps.len() * (S::LEN + I::LEN);
+    let size = steps.len() * (S::LEN + I::LEN + B::LEN);
 
     let first_eq_iter = (0..S::LEN).map(|i| (i, i, -1.0));
 
@@ -120,10 +120,10 @@ pub fn constr_mat<S: GenArray, I: GenArray, C: GenArray>(
         .enumerate()
         .flat_map(|(i, step)| {
             (0..S::LEN).flat_map(move |y| {
-                (0..S::LEN + I::LEN)
+                (0..S::LEN + I::LEN + B::LEN)
                     .map(move |x| {
                         let y_offset = (i + 1) * S::LEN;
-                        let x_offset = i * (S::LEN + I::LEN);
+                        let x_offset = i * (S::LEN + I::LEN + B::LEN);
                         let value = if x < S::LEN {
                             step.state_step[(y, x)]
                         } else {
@@ -133,16 +133,16 @@ pub fn constr_mat<S: GenArray, I: GenArray, C: GenArray>(
                     })
                     .chain(once((
                         (i + 1) * S::LEN + y,
-                        (i + 1) * (S::LEN + I::LEN) + y,
+                        (i + 1) * (S::LEN + I::LEN + B::LEN) + y,
                         -1.0,
                     )))
             })
         });
 
     let ineq_iter = (0..steps.len()).flat_map(move |i| {
-        (0..I::LEN).map(move |y| {
-            let y_offset = steps.len() * S::LEN + i * I::LEN;
-            let x_offset = i * (S::LEN + I::LEN) + S::LEN;
+        (0..I::LEN + B::LEN).map(move |y| {
+            let y_offset = steps.len() * S::LEN + i * (I::LEN + B::LEN);
+            let x_offset = i * (S::LEN + I::LEN + B::LEN) + S::LEN;
             (y_offset + y, x_offset + y, 1.0)
         })
     });
@@ -168,8 +168,8 @@ pub fn constr_mat<S: GenArray, I: GenArray, C: GenArray>(
 ///
 /// where the left column is the lower bounds (`bl`) and the right column the
 /// upper bounds (`bh`).
-pub fn constr_vec<S: GenArray, I: GenArray, C: GenArray>(
-    steps: &[RiccatiStep<S, I, C>],
+pub fn constr_vec<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+    steps: &[RiccatiStep<S, I, C, B>],
     initial_state: Array<S, f64>,
 ) -> impl Iterator<Item = (f64, f64)> {
     let first_eq_iter =
@@ -181,7 +181,7 @@ pub fn constr_vec<S: GenArray, I: GenArray, C: GenArray>(
 
     let ineq_iter = steps
         .iter()
-        .flat_map(|step| (0..I::LEN).map(|i| step.input_ranges.as_slice()[i]));
+        .flat_map(|step| (0..I::LEN + B::LEN).map(|i| step.input_ranges.as_slice()[i]));
 
     first_eq_iter.chain(eq_iter).chain(ineq_iter)
 }

@@ -2,10 +2,39 @@
 
 mod continuous;
 
+use core::ops::Range;
+
 use crate::math::{Dual, Linear, Zero};
 use crate::{Array, ArrayInst, GenArray};
 
 pub use self::continuous::{Continuous, RungeKutta4};
+
+/// A double-sided soft constraint with constant bounds.
+#[derive(Clone, Copy)]
+pub struct Bounded<D> {
+    /// The value to be constrained.
+    pub value: Dual<D>,
+    /// The lower bound.
+    pub min: f64,
+    /// The upper bound.
+    pub max: f64,
+    /// The cost of a violation.
+    pub weight: f64,
+}
+
+impl<D> Bounded<D> {
+    /// Creates a bound on the form `range.start <= value <= range.end`. If the
+    /// constraint is violated, the penalty is the distance outside the range
+    /// multiplied by `weight`.
+    pub fn new(value: Dual<D>, range: Range<f64>, weight: f64) -> Bounded<D> {
+        Bounded {
+            value,
+            min: range.start,
+            max: range.end,
+            weight,
+        }
+    }
+}
 
 /// An explicit non-linear discrete time model on the form
 /// `x[k+1] = time_step(x[k], u[k], k)`.
@@ -22,6 +51,8 @@ pub trait Discrete {
     type Input: GenArray;
     /// A vector whose squared magnitude is the cost at some time step.
     type Cost: GenArray;
+    /// The values to limit with soft constraints.
+    type Bounds: GenArray;
 
     /// Performs a single time step. Uses dual numbers to make it possible to
     /// linearize the model.
@@ -43,6 +74,14 @@ pub trait Discrete {
     /// The valid range of each input. The lower bound must be less than or equal to
     /// the upper bound.
     fn input_ranges(&self, time: usize) -> Array<Self::Input, (f64, f64)>;
+
+    /// The soft constraints to apply.
+    fn bounds<D: Linear>(
+        &self,
+        time: usize,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::Bounds, Bounded<D>>;
 
     /// A convenience method to perform the time step without tracking any gradient.
     fn time_step_f64(
@@ -75,6 +114,7 @@ impl<M: Discrete> Discrete for &M {
     type State = M::State;
     type Input = M::Input;
     type Cost = M::Cost;
+    type Bounds = M::Bounds;
 
     fn time_step<D: Linear>(
         &self,
@@ -96,5 +136,14 @@ impl<M: Discrete> Discrete for &M {
 
     fn input_ranges(&self, time: usize) -> Array<Self::Input, (f64, f64)> {
         M::input_ranges(self, time)
+    }
+
+    fn bounds<D: Linear>(
+        &self,
+        time: usize,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::Bounds, Bounded<D>> {
+        M::bounds(self, time, state, input)
     }
 }

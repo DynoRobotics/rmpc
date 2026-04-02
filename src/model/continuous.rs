@@ -2,7 +2,7 @@ use core::iter::zip;
 
 use crate::array::repeat;
 use crate::math::{Dual, Linear};
-use crate::model::Discrete;
+use crate::model::{Bounded, Discrete};
 use crate::{Array, ArrayInst, GenArray};
 
 /// An explicit non-linear continuous time model on the form
@@ -31,6 +31,8 @@ pub trait Continuous {
     type Input: GenArray;
     /// A vector whose squared magnitude is the cost density at some point in time.
     type Cost: GenArray;
+    /// The values to limit with soft constraints.
+    type Bounds: GenArray;
 
     /// Decides which states should be treated as discrete time. For these states,
     /// the value returned by [`update`][Self::update] is used as the value of the
@@ -125,6 +127,16 @@ pub trait Continuous {
     /// the upper bound.
     fn input_ranges(&self, time: f64, idx: usize, dt: f64) -> Array<Self::Input, (f64, f64)>;
 
+    /// The soft constraints to apply.
+    fn bounds<D: Linear>(
+        &self,
+        time: f64,
+        idx: usize,
+        dt: f64,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::Bounds, Bounded<D>>;
+
     /// Turns `self` into a discrete time model using RK4 with zero order hold.
     fn discretize(self, delta_time: f64) -> RungeKutta4<Self>
     where
@@ -141,6 +153,7 @@ impl<M: Continuous> Continuous for &M {
     type State = M::State;
     type Input = M::Input;
     type Cost = M::Cost;
+    type Bounds = M::Bounds;
 
     const IS_DISCRETE: Array<Self::State, bool> = M::IS_DISCRETE;
 
@@ -169,6 +182,17 @@ impl<M: Continuous> Continuous for &M {
     fn input_ranges(&self, time: f64, idx: usize, dt: f64) -> Array<Self::Input, (f64, f64)> {
         M::input_ranges(self, time, idx, dt)
     }
+
+    fn bounds<D: Linear>(
+        &self,
+        time: f64,
+        idx: usize,
+        dt: f64,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::Bounds, Bounded<D>> {
+        M::bounds(self, time, idx, dt, state, input)
+    }
 }
 
 /// A discrete version of a continuous model. Uses the [RK4] method to
@@ -186,6 +210,7 @@ impl<M: Continuous> Discrete for RungeKutta4<M> {
     type State = M::State;
     type Input = M::Input;
     type Cost = M::Cost;
+    type Bounds = M::Bounds;
 
     fn time_step<D: Linear>(
         &self,
@@ -245,6 +270,8 @@ impl<M: Continuous> Discrete for RungeKutta4<M> {
         // To do: Would it be beneficial to use RK4 here aswell instead of this Riemann
         // integral style summation?
 
+        let scale = libm::sqrt(self.delta_time);
+
         self.model
             .cost_vector(
                 time as f64 * self.delta_time,
@@ -253,11 +280,33 @@ impl<M: Continuous> Discrete for RungeKutta4<M> {
                 state,
                 input,
             )
-            .map(|value| value * self.delta_time)
+            .map(|value| value * scale)
     }
 
     fn input_ranges(&self, time: usize) -> Array<Self::Input, (f64, f64)> {
         self.model
             .input_ranges(time as f64 * self.delta_time, time, self.delta_time)
+    }
+
+    fn bounds<D: Linear>(
+        &self,
+        time: usize,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Array<Self::Bounds, Bounded<D>> {
+        let scale = libm::sqrt(self.delta_time);
+
+        self.model
+            .bounds(
+                time as f64 * self.delta_time,
+                time,
+                self.delta_time,
+                state,
+                input,
+            )
+            .map(|mut bound| {
+                bound.weight *= scale;
+                bound
+            })
     }
 }

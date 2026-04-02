@@ -2,7 +2,7 @@
 //! recursion.
 
 use crate::array::{Concat, from_fn, repeat};
-use crate::math::{Linear, Matrix, Vector, inv_no_pivot, linearize, vector};
+use crate::math::{Dual, Linear, Matrix, Vector, Zero, inv_no_pivot, linearize, vector};
 use crate::model::Discrete;
 use crate::{Array, ArrayInst, GenArray};
 
@@ -29,44 +29,44 @@ pub struct Change {
 
 /// The state of a single time step in the MPC solver.
 #[derive(Clone)]
-pub struct RiccatiStep<S: GenArray, I: GenArray, C: GenArray> {
+pub struct RiccatiStep<S: GenArray, I: GenArray, C: GenArray, B: GenArray> {
     /// The state found by the solver.
     pub optimal_state: Array<S, f64>,
     /// The input found by the solver.
     pub optimal_input: Array<I, f64>,
 
     /// The allowed range of each input.
-    input_ranges: Array<I, (f64, f64)>,
+    input_ranges: Array<Concat<I, B>, (f64, f64)>,
 
     /// The current active set.
-    active_set: Array<I, Option<Bound>>,
+    active_set: Array<Concat<I, B>, Option<Bound>>,
 
     /// The `A` matrix in the time step `A*x + B*u + a`.
     state_step: Matrix<S, S>,
     /// The `B` matrix in the time step `A*x + B*u + a`.
-    input_step: Matrix<S, I>,
+    input_step: Matrix<S, Concat<I, B>>,
     /// The `a` vector in the time step `A*x + B*u + a`.
     const_step: Vector<S>,
 
     /// The `C` matrix in the cost function `|C*x + D*u + c|^2`.
-    state_cost: Matrix<C, S>,
+    state_cost: Matrix<Concat<C, B>, S>,
     /// The `D` matrix in the cost function `|C*x + D*u + c|^2`.
-    input_cost: Matrix<C, I>,
+    input_cost: Matrix<Concat<C, B>, Concat<I, B>>,
     /// The `c` vector in the cost function `|C*x + D*u + c|^2`.
-    const_cost: Vector<C>,
+    const_cost: Vector<Concat<C, B>>,
 
     // Note: These are for the next time step according to the notation in the
     // paper. This simplifies the implementation as those values are almost always
     // the value of interest.
     p_mat: Matrix<S, S>,
-    h_mat: Matrix<S, I>,
-    g_inv: Matrix<I, I>,
-    k_mat: Matrix<I, S>,
+    h_mat: Matrix<S, Concat<I, B>>,
+    g_inv: Matrix<Concat<I, B>, Concat<I, B>>,
+    k_mat: Matrix<Concat<I, B>, S>,
     psi_vec: Vector<S>,
-    k_vec: Vector<I>,
+    k_vec: Vector<Concat<I, B>>,
 }
 
-impl<S: GenArray, I: GenArray, C: GenArray> RiccatiStep<S, I, C> {
+impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> RiccatiStep<S, I, C, B> {
     /// Creates an instance of [`RiccatiStep`] with all matrices set to zero.
     pub const fn new() -> Self {
         Self {
@@ -100,13 +100,21 @@ impl<S: GenArray, I: GenArray, C: GenArray> RiccatiStep<S, I, C> {
         input: Array<I, f64>,
         time: usize,
     ) where
-        M: Discrete<State = S, Input = I, Cost = C>,
+        M: Discrete<State = S, Input = I, Cost = C, Bounds = B>,
     {
-        let point = vector(state.concat(input));
+        // The derivative of the cost function is constant with respect to the slack
+        // variables, so it doesn't matter what value they have during linearization.
+        //
+        // To do: Avoid linearizing with respect to the slack variables. The derivatives
+        // are trivial so entering them manually would avoid putting them inside the AD
+        // gradients, possibly saving a bit of computation time.
+        let zeroed_slack: Array<B, f64> = repeat(0.0);
+        let point = vector(state.concat(input.concat(zeroed_slack)));
 
-        self.input_ranges = model.input_ranges(time);
+        let bounds = model.bounds::<Zero>(time, state.map(Dual::from), input.map(Dual::from));
+        self.input_ranges = Concat(model.input_ranges(time), bounds.map(|b| (b.min, b.max)));
 
-        let (jac_step, const_step) = linearize(point, |Concat(state, input)| {
+        let (jac_step, const_step) = linearize(point, |Concat(state, Concat(input, _slack))| {
             model.time_step(time, state, input)
         });
         let (state_step, input_step) = jac_step.split_h();
@@ -115,8 +123,13 @@ impl<S: GenArray, I: GenArray, C: GenArray> RiccatiStep<S, I, C> {
         self.input_step = input_step;
         self.const_step = const_step;
 
-        let (jac_cost, const_cost) = linearize(point, |Concat(state, input)| {
-            model.cost_vector(time, state, input)
+        let (jac_cost, const_cost) = linearize(point, |Concat(state, Concat(input, slack))| {
+            let cost = model.cost_vector(time, state, input);
+            let violation_cost = model
+                .bounds(time, state, input)
+                .zip(slack)
+                .map(|(b, r)| (b.value - r) * b.weight);
+            Concat(cost, violation_cost)
         });
         let (state_cost, input_cost) = jac_cost.split_h();
 
@@ -126,7 +139,7 @@ impl<S: GenArray, I: GenArray, C: GenArray> RiccatiStep<S, I, C> {
     }
 }
 
-impl<S: GenArray, I: GenArray, C: GenArray> Default for RiccatiStep<S, I, C> {
+impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> Default for RiccatiStep<S, I, C, B> {
     fn default() -> Self {
         Self::new()
     }
@@ -140,9 +153,9 @@ impl<S: GenArray, I: GenArray, C: GenArray> Default for RiccatiStep<S, I, C> {
 ///
 /// Note that due to rounding errors there is a risk of the solver not detecting
 /// convergence when it has reached the optimum.
-pub fn step<S: GenArray, I: GenArray, C: GenArray>(
+pub fn step<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
-    steps: &mut [RiccatiStep<S, I, C>],
+    steps: &mut [RiccatiStep<S, I, C, B>],
 ) -> Option<Change> {
     factorize_upto(steps, steps.len() - 1);
     backward_recursion_upto(steps, steps.len() - 1);
@@ -150,9 +163,9 @@ pub fn step<S: GenArray, I: GenArray, C: GenArray>(
 }
 
 /// Same as [`step_update`] but recomputes the updated part from scratch.
-pub fn step_old_update<S: GenArray, I: GenArray, C: GenArray>(
+pub fn step_old_update<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
-    steps: &mut [RiccatiStep<S, I, C>],
+    steps: &mut [RiccatiStep<S, I, C, B>],
     last_change: Change,
 ) -> Option<Change> {
     factorize_upto(steps, last_change.time);
@@ -167,9 +180,9 @@ pub fn step_old_update<S: GenArray, I: GenArray, C: GenArray>(
 /// Note that the list of steps must not have been altered since the last call
 /// to [`step`], as that violates the assumptions of this algorithm, likely
 /// resulting in nonsensical results.
-pub fn step_update<S: GenArray, I: GenArray, C: GenArray>(
+pub fn step_update<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
-    steps: &mut [RiccatiStep<S, I, C>],
+    steps: &mut [RiccatiStep<S, I, C, B>],
     last_change: Change,
 ) -> Option<Change> {
     update_factorization(steps, last_change);
@@ -179,8 +192,8 @@ pub fn step_update<S: GenArray, I: GenArray, C: GenArray>(
 
 /// Performs the factorization algorithm. Assumes that the steps after `last`
 /// have already been computed.
-fn factorize_upto<S: GenArray, I: GenArray, C: GenArray>(
-    steps: &mut [RiccatiStep<S, I, C>],
+fn factorize_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+    steps: &mut [RiccatiStep<S, I, C, B>],
     last: usize,
 ) {
     // To do: Possibly support a mayer term
@@ -234,8 +247,8 @@ fn factorize_upto<S: GenArray, I: GenArray, C: GenArray>(
     }
 }
 
-fn update_factorization<S: GenArray, I: GenArray, C: GenArray>(
-    steps: &mut [RiccatiStep<S, I, C>],
+fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+    steps: &mut [RiccatiStep<S, I, C, B>],
     change: Change,
 ) {
     let t = change.time;
@@ -321,8 +334,8 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray>(
 }
 
 /// Performs the backward recursion algorithm.
-fn backward_recursion_upto<S: GenArray, I: GenArray, C: GenArray>(
-    steps: &mut [RiccatiStep<S, I, C>],
+fn backward_recursion_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+    steps: &mut [RiccatiStep<S, I, C, B>],
     last: usize,
 ) {
     // To do: Possibly support a mayer term
@@ -359,8 +372,8 @@ fn backward_recursion_upto<S: GenArray, I: GenArray, C: GenArray>(
 /// Performs the forward recursion algorithm and updates a single constraint if
 /// the solution is suboptimal or infeasible. Returns a struct containing
 /// information about the constraint that was changed.
-fn forward_recursion<S: GenArray, I: GenArray, C: GenArray>(
-    steps: &mut [RiccatiStep<S, I, C>],
+fn forward_recursion<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+    steps: &mut [RiccatiStep<S, I, C, B>],
     initial_state: Array<S, f64>,
 ) -> Option<Change> {
     let mut x = vector(initial_state);
@@ -403,6 +416,7 @@ fn forward_recursion<S: GenArray, I: GenArray, C: GenArray>(
         step.optimal_input = u
             .into_array()
             .zip(step.input_ranges)
+            .0
             .map(|(val, (lower, upper))| val.clamp(lower, upper));
 
         let y = step.state_cost * x + step.input_cost * u + step.const_cost;
