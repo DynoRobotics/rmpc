@@ -2,7 +2,7 @@
 
 use rmpc::math::{Dual, Linear};
 use rmpc::model::{Bounded, Continuous};
-use rmpc::riccati::{self, RiccatiStep};
+use rmpc::mpc::{self, MpcStep};
 use rmpc::{ArrayInst, FieldNames, GenArray};
 
 use crate::common::plot::{Plot, PlotType};
@@ -100,7 +100,7 @@ fn main() -> std::io::Result<()> {
     // matter which point is used for the linearization. If the model is nonlinear,
     // it is a good idea to pick a point close to where the optimum is expected to
     // be.
-    let mut steps = vec![RiccatiStep::new(); horizon];
+    let mut steps = vec![MpcStep::new(); horizon];
     for (i, step) in steps.iter_mut().enumerate() {
         let state = State { pos: 0.0, vel: 0.0 };
         let input = Input { acc: 0.0 };
@@ -108,10 +108,10 @@ fn main() -> std::io::Result<()> {
     }
 
     // Solve the optimization problem to find the optimal solution.
-    let mut changed = riccati::step(initial_state, &mut steps);
+    let mut changed = mpc::step(initial_state, &mut steps);
     let mut iterations = 1;
     while let Some(change) = changed {
-        changed = riccati::step_update(initial_state, &mut steps, change);
+        changed = mpc::step_incremental_update(initial_state, &mut steps, change);
         iterations += 1;
     }
     println!("Optimum found after {iterations} iterations");

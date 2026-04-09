@@ -11,7 +11,7 @@
 
 use core::iter::once;
 
-use crate::riccati::RiccatiStep;
+use crate::mpc::MpcStep;
 use crate::{Array, ArrayInst, GenArray};
 
 /// An iterator over the elements in a sparse matrix.
@@ -35,7 +35,7 @@ pub struct SparseIter<I> {
 ///  \                          D_(n-1)^T C_(n-1)  D_(n-1)^T D_(n-1) /
 /// ```
 pub fn cost_mat<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
-    steps: &[RiccatiStep<S, I, C, B>],
+    steps: &[MpcStep<S, I, C, B>],
 ) -> SparseIter<impl Iterator<Item = (usize, usize, f64)>> {
     let size = steps.len() * (S::LEN + I::LEN + B::LEN);
 
@@ -79,7 +79,7 @@ pub fn cost_mat<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 ///  \ D_(n-1)^T c_0 /
 /// ```
 pub fn cost_vec<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
-    steps: &[RiccatiStep<S, I, C, B>],
+    steps: &[MpcStep<S, I, C, B>],
 ) -> impl Iterator<Item = f64> {
     steps.iter().flat_map(|step| {
         (0..S::LEN + I::LEN + B::LEN).map(move |y| {
@@ -109,7 +109,7 @@ pub fn cost_vec<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 ///  \                                                  I /
 /// ```
 pub fn constr_mat<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
-    steps: &[RiccatiStep<S, I, C, B>],
+    steps: &[MpcStep<S, I, C, B>],
 ) -> SparseIter<impl Iterator<Item = (usize, usize, f64)>> {
     let size = steps.len() * (S::LEN + I::LEN + B::LEN);
 
@@ -169,7 +169,7 @@ pub fn constr_mat<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 /// where the left column is the lower bounds (`bl`) and the right column the
 /// upper bounds (`bh`).
 pub fn constr_vec<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
-    steps: &[RiccatiStep<S, I, C, B>],
+    steps: &[MpcStep<S, I, C, B>],
     initial_state: Array<S, f64>,
 ) -> impl Iterator<Item = (f64, f64)> {
     let first_eq_iter =

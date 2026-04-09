@@ -180,12 +180,16 @@ async fn main() {
         // case the solver doesn't detect convergence. This is acceptable as even if the
         // solver hasn't converged completely, a suboptimal input should be much better
         // than not having a solution in time.
-        for _ in 0..10 {
-            let done = mpc::iterate(state, &mut steps);
-            if done {
+        let mut changed = mpc::step(state, &mut steps);
+        let mut iterations = 1;
+        while let Some(change) = changed {
+            changed = mpc::step_incremental_update(state, &mut steps, change);
+            iterations += 1;
+            if iterations >= 10 {
                 break;
             }
         }
+
         let input = steps[0].optimal_input;
 
         // Simulate the model using the input.

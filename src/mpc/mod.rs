@@ -1,5 +1,4 @@
-//! Rewrite of the [`mpc`](crate::mpc) module using a standard Riccati
-//! recursion.
+//! An implementation of model predictive control using Riccati recursion.
 
 use crate::array::{Concat, from_fn, repeat};
 use crate::math::{Dual, Linear, Matrix, Vector, Zero, inv_no_pivot, linearize, vector};
@@ -29,7 +28,7 @@ pub struct Change {
 
 /// The state of a single time step in the MPC solver.
 #[derive(Clone)]
-pub struct RiccatiStep<S: GenArray, I: GenArray, C: GenArray, B: GenArray> {
+pub struct MpcStep<S: GenArray, I: GenArray, C: GenArray, B: GenArray> {
     /// The state found by the solver.
     pub optimal_state: Array<S, f64>,
     /// The input found by the solver.
@@ -66,7 +65,7 @@ pub struct RiccatiStep<S: GenArray, I: GenArray, C: GenArray, B: GenArray> {
     k_vec: Vector<Concat<I, B>>,
 }
 
-impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> RiccatiStep<S, I, C, B> {
+impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
     /// Creates an instance of [`RiccatiStep`] with all matrices set to zero.
     pub const fn new() -> Self {
         Self {
@@ -139,7 +138,7 @@ impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> RiccatiStep<S, I, C, B>
     }
 }
 
-impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> Default for RiccatiStep<S, I, C, B> {
+impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> Default for MpcStep<S, I, C, B> {
     fn default() -> Self {
         Self::new()
     }
@@ -155,17 +154,18 @@ impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> Default for RiccatiStep
 /// convergence when it has reached the optimum.
 pub fn step<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
-    steps: &mut [RiccatiStep<S, I, C, B>],
+    steps: &mut [MpcStep<S, I, C, B>],
 ) -> Option<Change> {
     factorize_upto(steps, steps.len() - 1);
     backward_recursion_upto(steps, steps.len() - 1);
     forward_recursion(steps, initial_state)
 }
 
-/// Same as [`step_update`] but recomputes the updated part from scratch.
-pub fn step_old_update<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+/// Same as [`step_incremental_update`] but recomputes the updated part from
+/// scratch.
+pub fn step_update<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
-    steps: &mut [RiccatiStep<S, I, C, B>],
+    steps: &mut [MpcStep<S, I, C, B>],
     last_change: Change,
 ) -> Option<Change> {
     factorize_upto(steps, last_change.time);
@@ -180,9 +180,9 @@ pub fn step_old_update<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 /// Note that the list of steps must not have been altered since the last call
 /// to [`step`], as that violates the assumptions of this algorithm, likely
 /// resulting in nonsensical results.
-pub fn step_update<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+pub fn step_incremental_update<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
-    steps: &mut [RiccatiStep<S, I, C, B>],
+    steps: &mut [MpcStep<S, I, C, B>],
     last_change: Change,
 ) -> Option<Change> {
     update_factorization(steps, last_change);
@@ -193,7 +193,7 @@ pub fn step_update<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 /// Performs the factorization algorithm. Assumes that the steps after `last`
 /// have already been computed.
 fn factorize_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
-    steps: &mut [RiccatiStep<S, I, C, B>],
+    steps: &mut [MpcStep<S, I, C, B>],
     last: usize,
 ) {
     // To do: Possibly support a mayer term
@@ -248,7 +248,7 @@ fn factorize_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 }
 
 fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
-    steps: &mut [RiccatiStep<S, I, C, B>],
+    steps: &mut [MpcStep<S, I, C, B>],
     change: Change,
 ) {
     let t = change.time;
@@ -335,7 +335,7 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 
 /// Performs the backward recursion algorithm.
 fn backward_recursion_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
-    steps: &mut [RiccatiStep<S, I, C, B>],
+    steps: &mut [MpcStep<S, I, C, B>],
     last: usize,
 ) {
     // To do: Possibly support a mayer term
@@ -373,7 +373,7 @@ fn backward_recursion_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 /// the solution is suboptimal or infeasible. Returns a struct containing
 /// information about the constraint that was changed.
 fn forward_recursion<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
-    steps: &mut [RiccatiStep<S, I, C, B>],
+    steps: &mut [MpcStep<S, I, C, B>],
     initial_state: Array<S, f64>,
 ) -> Option<Change> {
     let mut x = vector(initial_state);
