@@ -80,6 +80,14 @@ pub trait GenArray: Copy {
     fn from_fn<T: Copy>(f: impl FnMut(usize) -> T) -> Self::Arr<T> {
         from_fn(f)
     }
+
+    /// Constructs an instance by repeating an element, similar to `[value; N]` for
+    /// arryas. In some cases the equivalent function [`repeat`] may provide better
+    /// type inference.
+    #[inline]
+    fn repeat<T: Copy>(item: T) -> Self::Arr<T> {
+        repeat(item)
+    }
 }
 
 /// An instance of a generic fixed-size array. See the
@@ -151,7 +159,7 @@ pub unsafe trait ArrayInst: Copy {
 /// An instance of a generic array.
 pub type Array<A, T> = <A as GenArray>::Arr<T>;
 
-/// Initializes an array with all elements set to the same value.
+/// A `const` version of [`GenArray::repeat`].
 pub const fn repeat<A: ArrayInst>(item: A::Item) -> A {
     let mut array = MaybeUninit::<A>::uninit();
 

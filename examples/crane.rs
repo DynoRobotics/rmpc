@@ -5,7 +5,7 @@ use std::f64::consts::{PI, TAU};
 use macroquad::prelude::*;
 use rmpc::math::{Dual, Linear};
 use rmpc::model::{Bounded, Continuous, Discrete};
-use rmpc::mpc::{self, MpcStep};
+use rmpc::mpc::{self, MpcStep, linearize};
 use rmpc::{FieldNames, GenArray};
 
 #[derive(GenArray, FieldNames, Clone, Copy)]
@@ -148,13 +148,10 @@ async fn main() {
     };
     let traj_input = Input { target_vel: 0.0 };
 
-    let mut steps = vec![MpcStep::new(); 50];
-
     let mut mpc_model = model.discretize(0.2);
 
-    for (i, step) in steps.iter_mut().enumerate() {
-        step.linearize(&mpc_model, traj_point, traj_input, i);
-    }
+    let mut steps = vec![MpcStep::new(traj_point, traj_input); 50];
+    linearize(&mpc_model, &mut steps);
 
     loop {
         // Position the camera so everything is visible
@@ -172,23 +169,13 @@ async fn main() {
         mpc_model.model.target_pos = camera.screen_to_world(vec2(mouse_x, mouse_y)).x as f64;
 
         // Re-linearize the model as it has changed
-        for (i, step) in steps.iter_mut().enumerate() {
-            step.linearize(&mpc_model, traj_point, traj_input, i);
-        }
+        linearize(&mpc_model, &mut steps);
 
         // Iterate a few times to find a good solution. We need an iteration limit in
         // case the solver doesn't detect convergence. This is acceptable as even if the
         // solver hasn't converged completely, a suboptimal input should be much better
         // than not having a solution in time.
-        let mut changed = mpc::step(state, &mut steps);
-        let mut iterations = 1;
-        while let Some(change) = changed {
-            changed = mpc::step_incremental_update(state, &mut steps, change);
-            iterations += 1;
-            if iterations >= 10 {
-                break;
-            }
-        }
+        mpc::iterate(state, &mut steps, 10);
 
         let input = steps[0].optimal_input;
 

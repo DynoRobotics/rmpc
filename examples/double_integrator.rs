@@ -2,7 +2,7 @@
 
 use rmpc::math::{Dual, Linear};
 use rmpc::model::{Bounded, Continuous};
-use rmpc::mpc::{self, MpcStep};
+use rmpc::mpc::{self, MpcStep, linearize};
 use rmpc::{ArrayInst, FieldNames, GenArray};
 
 use crate::common::plot::{Plot, PlotType};
@@ -100,12 +100,8 @@ fn main() -> std::io::Result<()> {
     // matter which point is used for the linearization. If the model is nonlinear,
     // it is a good idea to pick a point close to where the optimum is expected to
     // be.
-    let mut steps = vec![MpcStep::new(); horizon];
-    for (i, step) in steps.iter_mut().enumerate() {
-        let state = State { pos: 0.0, vel: 0.0 };
-        let input = Input { acc: 0.0 };
-        step.linearize(&model, state, input, i);
-    }
+    let mut steps = vec![MpcStep::new(State { pos: 0.0, vel: 0.0 }, Input { acc: 0.0 }); horizon];
+    linearize(&model, &mut steps);
 
     // Solve the optimization problem to find the optimal solution.
     let mut changed = mpc::step(initial_state, &mut steps);

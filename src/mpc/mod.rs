@@ -1,7 +1,9 @@
 //! An implementation of model predictive control using Riccati recursion.
 
+use core::iter::zip;
+
 use crate::array::{Concat, from_fn, repeat};
-use crate::math::{Dual, Linear, Matrix, Vector, Zero, inv_no_pivot, linearize, vector};
+use crate::math::{self, Dual, Linear, Matrix, Vector, Zero, inv_no_pivot, vector};
 use crate::model::Discrete;
 use crate::{Array, ArrayInst, GenArray};
 
@@ -29,6 +31,11 @@ pub struct Change {
 /// The state of a single time step in the MPC solver.
 #[derive(Clone)]
 pub struct MpcStep<S: GenArray, I: GenArray, C: GenArray, B: GenArray> {
+    /// The state to linearize the model around.
+    pub linearized_state: Array<S, f64>,
+    /// The input to linearize the model around.
+    pub linearized_input: Array<I, f64>,
+
     /// The state found by the solver.
     pub optimal_state: Array<S, f64>,
     /// The input found by the solver.
@@ -67,8 +74,10 @@ pub struct MpcStep<S: GenArray, I: GenArray, C: GenArray, B: GenArray> {
 
 impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
     /// Creates an instance of [`RiccatiStep`] with all matrices set to zero.
-    pub const fn new() -> Self {
+    pub const fn new(linearized_state: Array<S, f64>, linearized_input: Array<I, f64>) -> Self {
         Self {
+            linearized_state,
+            linearized_input,
             optimal_state: repeat(0.0),
             optimal_input: repeat(0.0),
             input_ranges: repeat((0.0, 0.0)),
@@ -88,17 +97,12 @@ impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
         }
     }
 
-    /// Linearizes the model around a specified state and input.
+    /// Linearizes the model around a the state and input in `linearized_state` and `linearized_input`.
     ///
     /// If the model is time-dependent, the parameter `time` should be set to the
     /// index of this time step.
-    pub fn linearize<M>(
-        &mut self,
-        model: &M,
-        state: Array<S, f64>,
-        input: Array<I, f64>,
-        time: usize,
-    ) where
+    pub fn linearize<M>(&mut self, model: &M, time: usize)
+    where
         M: Discrete<State = S, Input = I, Cost = C, Bounds = B>,
     {
         // The derivative of the cost function is constant with respect to the slack
@@ -108,28 +112,37 @@ impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
         // are trivial so entering them manually would avoid putting them inside the AD
         // gradients, possibly saving a bit of computation time.
         let zeroed_slack: Array<B, f64> = repeat(0.0);
-        let point = vector(state.concat(input.concat(zeroed_slack)));
+        let point = vector(
+            self.linearized_state
+                .concat(self.linearized_input.concat(zeroed_slack)),
+        );
 
-        let bounds = model.bounds::<Zero>(time, state.map(Dual::from), input.map(Dual::from));
+        let bounds = model.bounds::<Zero>(
+            time,
+            self.linearized_state.map(Dual::from),
+            self.linearized_input.map(Dual::from),
+        );
         self.input_ranges = Concat(model.input_ranges(time), bounds.map(|b| (b.min, b.max)));
 
-        let (jac_step, const_step) = linearize(point, |Concat(state, Concat(input, _slack))| {
-            model.time_step(time, state, input)
-        });
+        let (jac_step, const_step) =
+            math::linearize(point, |Concat(state, Concat(input, _slack))| {
+                model.time_step(time, state, input)
+            });
         let (state_step, input_step) = jac_step.split_h();
 
         self.state_step = state_step;
         self.input_step = input_step;
         self.const_step = const_step;
 
-        let (jac_cost, const_cost) = linearize(point, |Concat(state, Concat(input, slack))| {
-            let cost = model.cost_vector(time, state, input);
-            let violation_cost = model
-                .bounds(time, state, input)
-                .zip(slack)
-                .map(|(b, r)| (b.value - r) * b.weight);
-            Concat(cost, violation_cost)
-        });
+        let (jac_cost, const_cost) =
+            math::linearize(point, |Concat(state, Concat(input, slack))| {
+                let cost = model.cost_vector(time, state, input);
+                let violation_cost = model
+                    .bounds(time, state, input)
+                    .zip(slack)
+                    .map(|(b, r)| (b.value - r) * b.weight);
+                Concat(cost, violation_cost)
+            });
         let (state_cost, input_cost) = jac_cost.split_h();
 
         self.state_cost = state_cost;
@@ -138,10 +151,80 @@ impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
     }
 }
 
-impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> Default for MpcStep<S, I, C, B> {
-    fn default() -> Self {
-        Self::new()
+/// Convenience function to call [`linearize`][MpcStep::linearize] on every
+/// step.
+#[allow(clippy::type_complexity)]
+pub fn linearize<M: Discrete>(
+    model: &M,
+    steps: &mut [MpcStep<M::State, M::Input, M::Cost, M::Bounds>],
+) {
+    for (i, step) in steps.iter_mut().enumerate() {
+        step.linearize(model, i);
     }
+}
+
+/// Moves the trajectory used for linearization towards the optimum found by the
+/// QP solver.
+pub fn sqp_step<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+    steps: &mut [MpcStep<S, I, C, B>],
+    state_trust: Array<S, f64>,
+    input_trust: Array<I, f64>,
+) {
+    let trust = Concat(state_trust, input_trust);
+
+    let mut maximum_step = 1.0;
+
+    for step in steps.iter() {
+        let previous = Concat(step.linearized_state, step.linearized_input);
+        let target = Concat(step.optimal_state, step.optimal_input);
+        let distance = previous.zip(target).map(|(p, t)| (p - t).abs());
+        for (&dist, &trust) in zip(distance.iter(), trust.iter()) {
+            if dist * maximum_step > trust {
+                maximum_step = trust / dist;
+            }
+        }
+    }
+
+    for step in steps {
+        let previous = Concat(step.linearized_state, step.linearized_input);
+        let target = Concat(step.optimal_state, step.optimal_input);
+        let target = previous
+            .zip(target)
+            .map(|(p, t)| p + (t - p) * maximum_step);
+        step.linearized_state = target.0;
+        step.linearized_input = target.1;
+    }
+}
+
+/// Performs multiple iterations of the QP solver. The first return value is the
+/// amount of iterations performed. The second return value is `true` if the QP
+/// solver has converged.
+///
+/// Note that due to rounding errors there is a risk of the solver not detecting
+/// that it has reached the optimum.
+pub fn iterate<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+    initial_state: Array<S, f64>,
+    steps: &mut [MpcStep<S, I, C, B>],
+    max_iterations: usize,
+) -> (usize, bool) {
+    // To do: Track the value of the cost function to detect convergence and/or
+    // rounding errors from the rank-1 updates
+
+    if max_iterations == 0 {
+        return (0, false);
+    }
+
+    let mut changed = step(initial_state, steps);
+    let mut iterations = 1;
+
+    while let Some(change) = changed
+        && iterations < max_iterations
+    {
+        changed = step_incremental_update(initial_state, steps, change);
+        iterations += 1;
+    }
+
+    (iterations, changed.is_none())
 }
 
 /// Performs a single iteration of the QP solver.
@@ -247,6 +330,8 @@ fn factorize_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     }
 }
 
+/// Uses rank-1 updates to efficiently update the factorization when a single
+/// constraint is added or removed.
 fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     steps: &mut [MpcStep<S, I, C, B>],
     change: Change,
