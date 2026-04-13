@@ -217,10 +217,8 @@ pub fn iterate<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     let mut changed = step(initial_state, steps);
     let mut iterations = 1;
 
-    while let Some(change) = changed
-        && iterations < max_iterations
-    {
-        changed = step_incremental_update(initial_state, steps, change);
+    while changed.is_some() && iterations < max_iterations {
+        changed = step_incremental_update(initial_state, steps, changed);
         iterations += 1;
     }
 
@@ -249,10 +247,12 @@ pub fn step<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 pub fn step_update<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
     steps: &mut [MpcStep<S, I, C, B>],
-    last_change: Change,
+    last_change: Option<Change>,
 ) -> Option<Change> {
-    factorize_upto(steps, last_change.time);
-    backward_recursion_upto(steps, last_change.time);
+    if let Some(last_change) = last_change {
+        factorize_upto(steps, last_change.time);
+        backward_recursion_upto(steps, last_change.time);
+    }
     forward_recursion(steps, initial_state)
 }
 
@@ -266,10 +266,12 @@ pub fn step_update<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 pub fn step_incremental_update<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
     steps: &mut [MpcStep<S, I, C, B>],
-    last_change: Change,
+    last_change: Option<Change>,
 ) -> Option<Change> {
-    update_factorization(steps, last_change);
-    backward_recursion_upto(steps, last_change.time);
+    if let Some(last_change) = last_change {
+        update_factorization(steps, last_change);
+        backward_recursion_upto(steps, last_change.time);
+    }
     forward_recursion(steps, initial_state)
 }
 
@@ -457,7 +459,7 @@ fn backward_recursion_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 /// Performs the forward recursion algorithm and updates a single constraint if
 /// the solution is suboptimal or infeasible. Returns a struct containing
 /// information about the constraint that was changed.
-fn forward_recursion<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
+pub fn forward_recursion<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     steps: &mut [MpcStep<S, I, C, B>],
     initial_state: Array<S, f64>,
 ) -> Option<Change> {

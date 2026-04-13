@@ -106,8 +106,8 @@ fn main() -> std::io::Result<()> {
     // Solve the optimization problem to find the optimal solution.
     let mut changed = mpc::step(initial_state, &mut steps);
     let mut iterations = 1;
-    while let Some(change) = changed {
-        changed = mpc::step_incremental_update(initial_state, &mut steps, change);
+    while changed.is_some() {
+        changed = mpc::step_incremental_update(initial_state, &mut steps, changed);
         iterations += 1;
     }
     println!("Optimum found after {iterations} iterations");
