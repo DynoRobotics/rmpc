@@ -77,7 +77,7 @@ pub trait GenArray: Copy {
     /// [`core::array::from_fn`]. In some cases the equivalent function [`from_fn`]
     /// may provide better type inference.
     #[inline]
-    fn from_fn<T: Copy>(f: impl FnMut(usize) -> T) -> Self::Arr<T> {
+    fn from_fn<T: Copy>(f: impl FnMut(usize) -> T) -> Array<Self, T> {
         from_fn(f)
     }
 
@@ -85,8 +85,16 @@ pub trait GenArray: Copy {
     /// arryas. In some cases the equivalent function [`repeat`] may provide better
     /// type inference.
     #[inline]
-    fn repeat<T: Copy>(item: T) -> Self::Arr<T> {
+    fn repeat<T: Copy>(item: T) -> Array<Self, T> {
         repeat(item)
+    }
+
+    /// Turns a reference to a slice into a reference to an array instance. Returns
+    /// `None` if the length of the slice is incorrect. In some cases the equivalent
+    /// function [`from_slice`] may provide better type inference.
+    #[inline]
+    fn from_slice<T: Copy>(slice: &[T]) -> Option<&Array<Self, T>> {
+        from_slice(slice)
     }
 }
 
@@ -176,6 +184,18 @@ pub const fn repeat<A: ArrayInst>(item: A::Item) -> A {
 
     // Safety: We have initialized all elements.
     unsafe { array.assume_init() }
+}
+
+/// A `const` version of [`GenArray::from_slice`].
+pub const fn from_slice<A: ArrayInst>(slice: &[A::Item]) -> Option<&A> {
+    if slice.len() != A::Gen::LEN {
+        return None;
+    }
+
+    // Safety: The `ArrayInst` implementation guarantees that the representation is
+    // identical.
+    let array = unsafe { slice.as_ptr().cast::<A>().as_ref() };
+    Some(array.unwrap())
 }
 
 /// Equivalent to [`GenArray::from_fn`] but with a slightly different signature
