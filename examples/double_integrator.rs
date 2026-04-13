@@ -2,7 +2,7 @@
 
 use rmpc::math::{Dual, Linear};
 use rmpc::model::{Bounded, Continuous};
-use rmpc::mpc::{self, MpcStep, linearize};
+use rmpc::mpc::{self, MpcStep, Settings, linearize};
 use rmpc::{ArrayInst, FieldNames, GenArray};
 
 use crate::common::plot::{Plot, PlotType};
@@ -103,11 +103,15 @@ fn main() -> std::io::Result<()> {
     let mut steps = vec![MpcStep::new(State { pos: 0.0, vel: 0.0 }, Input { acc: 0.0 }); horizon];
     linearize(&model, &mut steps);
 
+    // Settings for the solver, which contains the tolerances for determining
+    // convergence.
+    let settings = Settings::default();
+
     // Solve the optimization problem to find the optimal solution.
-    let mut changed = mpc::step(initial_state, &mut steps);
+    let mut changed = mpc::step(initial_state, &mut steps, &settings);
     let mut iterations = 1;
     while changed.is_some() {
-        changed = mpc::step_incremental_update(initial_state, &mut steps, changed);
+        changed = mpc::step_incremental_update(initial_state, &mut steps, changed, &settings);
         iterations += 1;
     }
     println!("Optimum found after {iterations} iterations");

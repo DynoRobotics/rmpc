@@ -5,7 +5,7 @@ use std::f64::consts::{PI, TAU};
 use macroquad::prelude::*;
 use rmpc::math::{Dual, Linear};
 use rmpc::model::{Bounded, Continuous, Discrete};
-use rmpc::mpc::{self, MpcStep, linearize};
+use rmpc::mpc::{self, MpcStep, Settings, linearize};
 use rmpc::{FieldNames, GenArray};
 
 #[derive(GenArray, FieldNames, Clone, Copy)]
@@ -150,6 +150,7 @@ async fn main() {
 
     let mut mpc_model = model.discretize(0.2);
 
+    let settings = Settings::default();
     let mut steps = vec![MpcStep::new(traj_point, traj_input); 50];
     linearize(&mpc_model, &mut steps);
 
@@ -175,7 +176,7 @@ async fn main() {
         // case the solver doesn't detect convergence. This is acceptable as even if the
         // solver hasn't converged completely, a suboptimal input should be much better
         // than not having a solution in time.
-        mpc::iterate(state, &mut steps, 10);
+        mpc::iterate(state, &mut steps, 10, &settings);
 
         let input = steps[0].optimal_input;
 

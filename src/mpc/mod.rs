@@ -9,6 +9,30 @@ use crate::{Array, ArrayInst, GenArray};
 
 pub mod export;
 
+/// Settings for the solver.
+#[derive(Clone)]
+pub struct Settings<I: GenArray, B: GenArray> {
+    /// Tolerance for the inputs.
+    ///
+    /// This determines how much of a violation the solver will accept when
+    /// determining if the solution is feasible.
+    pub input_tol: Array<I, f64>,
+    /// Tolerance for the inputs.
+    ///
+    /// This determines how much of a violation of the slack variables the solver
+    /// will accept when determining if the solution is feasible.
+    pub bound_tol: Array<B, f64>,
+}
+
+impl<I: GenArray, B: GenArray> Default for Settings<I, B> {
+    fn default() -> Self {
+        Self {
+            input_tol: repeat(1e-6),
+            bound_tol: repeat(1e-6),
+        }
+    }
+}
+
 /// The bound an input is currently constrained to.
 #[allow(missing_docs)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -201,11 +225,12 @@ pub fn sqp_step<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 /// solver has converged.
 ///
 /// Note that due to rounding errors there is a risk of the solver not detecting
-/// that it has reached the optimum.
+/// convergence if the tolerances are too low.
 pub fn iterate<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
     steps: &mut [MpcStep<S, I, C, B>],
     max_iterations: usize,
+    settings: &Settings<I, B>,
 ) -> (usize, bool) {
     // To do: Track the value of the cost function to detect convergence and/or
     // rounding errors from the rank-1 updates
@@ -214,11 +239,11 @@ pub fn iterate<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
         return (0, false);
     }
 
-    let mut changed = step(initial_state, steps);
+    let mut changed = step(initial_state, steps, settings);
     let mut iterations = 1;
 
     while changed.is_some() && iterations < max_iterations {
-        changed = step_incremental_update(initial_state, steps, changed);
+        changed = step_incremental_update(initial_state, steps, changed, settings);
         iterations += 1;
     }
 
@@ -232,14 +257,15 @@ pub fn iterate<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 /// next iteration more efficient.
 ///
 /// Note that due to rounding errors there is a risk of the solver not detecting
-/// convergence when it has reached the optimum.
+/// convergence if the tolerances are too low.
 pub fn step<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
     steps: &mut [MpcStep<S, I, C, B>],
+    settings: &Settings<I, B>,
 ) -> Option<Change> {
     factorize_upto(steps, steps.len() - 1);
     backward_recursion_upto(steps, steps.len() - 1);
-    forward_recursion(steps, initial_state)
+    forward_recursion(steps, initial_state, settings)
 }
 
 /// Same as [`step_incremental_update`] but recomputes the updated part from
@@ -248,12 +274,13 @@ pub fn step_update<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
     steps: &mut [MpcStep<S, I, C, B>],
     last_change: Option<Change>,
+    settings: &Settings<I, B>,
 ) -> Option<Change> {
     if let Some(last_change) = last_change {
         factorize_upto(steps, last_change.time);
         backward_recursion_upto(steps, last_change.time);
     }
-    forward_recursion(steps, initial_state)
+    forward_recursion(steps, initial_state, settings)
 }
 
 /// Performs a single iteration of the QP solver. This is similar to [`step`]
@@ -267,12 +294,13 @@ pub fn step_incremental_update<S: GenArray, I: GenArray, C: GenArray, B: GenArra
     initial_state: Array<S, f64>,
     steps: &mut [MpcStep<S, I, C, B>],
     last_change: Option<Change>,
+    settings: &Settings<I, B>,
 ) -> Option<Change> {
     if let Some(last_change) = last_change {
         update_factorization(steps, last_change);
         backward_recursion_upto(steps, last_change.time);
     }
-    forward_recursion(steps, initial_state)
+    forward_recursion(steps, initial_state, settings)
 }
 
 /// Performs the factorization algorithm. Assumes that the steps after `last`
@@ -462,8 +490,10 @@ fn backward_recursion_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 pub fn forward_recursion<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     steps: &mut [MpcStep<S, I, C, B>],
     initial_state: Array<S, f64>,
+    settings: &Settings<I, B>,
 ) -> Option<Change> {
     let mut x = vector(initial_state);
+    let tolerance = Concat(settings.input_tol, settings.bound_tol);
 
     let mut worst_violation = (0.0, 0, 0, Bound::Lower);
     let mut worst_dual = (0.0, 0, 0);
@@ -480,7 +510,7 @@ pub fn forward_recursion<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
         let u = step.k_mat * x + step.k_vec + const_input;
 
         // Check for violated constraints
-        for (j, bound) in step.active_set.iter().enumerate() {
+        for (j, (&bound, &tol)) in step.active_set.iter().zip(tolerance.iter()).enumerate() {
             if bound.is_none() {
                 let value = u[j];
                 let (lower, upper) = step.input_ranges.as_slice()[j];
@@ -493,7 +523,7 @@ pub fn forward_recursion<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
                     continue;
                 };
 
-                if amount > worst_violation.0 {
+                if amount > worst_violation.0 && amount > tol {
                     worst_violation = (amount, i, j, bound);
                 }
             }
