@@ -11,6 +11,10 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
+[features]
+default = ["f64"]
+f64 = []
+
 [lints]
 workspace = true
 

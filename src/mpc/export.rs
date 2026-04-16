@@ -56,7 +56,7 @@ pub fn cost_mat<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
                 (
                     offset + y,
                     offset + x,
-                    (x_col.transpose() * y_col).into_scalar(),
+                    (x_col.transpose() * y_col).into_scalar().as_f64(),
                 )
             })
         })
@@ -89,7 +89,7 @@ pub fn cost_vec<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
                 step.input_cost.col(y - S::LEN)
             };
 
-            (col.transpose() * step.const_cost).into_scalar()
+            (col.transpose() * step.const_cost).into_scalar().as_f64()
         })
     })
 }
@@ -129,7 +129,7 @@ pub fn constr_mat<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
                         } else {
                             step.input_step[(y, x - S::LEN)]
                         };
-                        (y_offset + y, x_offset + x, value)
+                        (y_offset + y, x_offset + x, value.as_f64())
                     })
                     .chain(once((
                         (i + 1) * S::LEN + y,
@@ -175,13 +175,19 @@ pub fn constr_vec<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     let first_eq_iter =
         (0..S::LEN).map(move |i| (-initial_state.as_slice()[i], -initial_state.as_slice()[i]));
 
-    let eq_iter = steps[..steps.len() - 1]
-        .iter()
-        .flat_map(|step| (0..S::LEN).map(|i| (-step.const_step[i], -step.const_step[i])));
+    let eq_iter = steps[..steps.len() - 1].iter().flat_map(|step| {
+        (0..S::LEN).map(|i| {
+            let v = -step.const_step[i].as_f64();
+            (v, v)
+        })
+    });
 
-    let ineq_iter = steps
-        .iter()
-        .flat_map(|step| (0..I::LEN + B::LEN).map(|i| step.input_ranges.as_slice()[i]));
+    let ineq_iter = steps.iter().flat_map(|step| {
+        (0..I::LEN + B::LEN).map(|i| {
+            let (l, u) = step.input_ranges.as_slice()[i];
+            (l.into(), u.into())
+        })
+    });
 
     first_eq_iter.chain(eq_iter).chain(ineq_iter)
 }

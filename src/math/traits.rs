@@ -1,20 +1,18 @@
 use core::ops::{Add, Mul, Neg, Sub};
 
+use crate::math::Float;
+
 /// A copyable type obeying the rules of a vector field.
 pub trait Linear:
     Add<Self, Output = Self>
     + Sub<Self, Output = Self>
-    + Mul<f64, Output = Self>
+    + Mul<Float, Output = Self>
     + Neg<Output = Self>
     + Copy
     + Sized
 {
     /// The zero vector.
     const ZERO: Self;
-}
-
-impl Linear for f64 {
-    const ZERO: Self = 0.0;
 }
 
 /// An element in the vector field containing only zero.
@@ -34,7 +32,7 @@ macro_rules! impl_zero_op {
 
 impl_zero_op!(Add<Zero>::add);
 impl_zero_op!(Sub<Zero>::sub);
-impl_zero_op!(Mul<f64>::mul);
+impl_zero_op!(Mul<Float>::mul);
 impl_zero_op!(Neg::neg);
 
 impl Linear for Zero {

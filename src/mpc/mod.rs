@@ -3,7 +3,7 @@
 use core::iter::zip;
 
 use crate::array::{Concat, from_fn, repeat};
-use crate::math::{self, Dual, Linear, Matrix, Vector, Zero, inv_no_pivot, vector};
+use crate::math::{self, Dual, Float, Linear, Matrix, Vector, Zero, inv_no_pivot, vector};
 use crate::model::Discrete;
 use crate::{Array, ArrayInst, GenArray};
 
@@ -26,9 +26,10 @@ pub struct Settings<I: GenArray, B: GenArray> {
 
 impl<I: GenArray, B: GenArray> Default for Settings<I, B> {
     fn default() -> Self {
+        let default_tol = if cfg!(feature = "f64") { 1e-6 } else { 1e-2 };
         Self {
-            input_tol: repeat(1e-6),
-            bound_tol: repeat(1e-6),
+            input_tol: repeat(default_tol),
+            bound_tol: repeat(default_tol),
         }
     }
 }
@@ -66,7 +67,7 @@ pub struct MpcStep<S: GenArray, I: GenArray, C: GenArray, B: GenArray> {
     pub optimal_input: Array<I, f64>,
 
     /// The allowed range of each input.
-    input_ranges: Array<Concat<I, B>, (f64, f64)>,
+    input_ranges: Array<Concat<I, B>, (Float, Float)>,
 
     /// The current active set.
     active_set: Array<Concat<I, B>, Option<Bound>>,
@@ -104,7 +105,7 @@ impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
             linearized_input,
             optimal_state: repeat(0.0),
             optimal_input: repeat(0.0),
-            input_ranges: repeat((0.0, 0.0)),
+            input_ranges: repeat((Float::ZERO, Float::ZERO)),
             active_set: repeat(None),
             state_step: Linear::ZERO,
             input_step: Linear::ZERO,
@@ -135,10 +136,11 @@ impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
         // To do: Avoid linearizing with respect to the slack variables. The derivatives
         // are trivial so entering them manually would avoid putting them inside the AD
         // gradients, possibly saving a bit of computation time.
-        let zeroed_slack: Array<B, f64> = repeat(0.0);
+        let zeroed_slack: Array<B, Float> = repeat(Float::ZERO);
         let point = vector(
             self.linearized_state
-                .concat(self.linearized_input.concat(zeroed_slack)),
+                .map(Float::from)
+                .concat(self.linearized_input.map(Float::from).concat(zeroed_slack)),
         );
 
         let bounds = model.bounds::<Zero>(
@@ -146,7 +148,8 @@ impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
             self.linearized_state.map(Dual::from),
             self.linearized_input.map(Dual::from),
         );
-        self.input_ranges = Concat(model.input_ranges(time), bounds.map(|b| (b.min, b.max)));
+        self.input_ranges = Concat(model.input_ranges(time), bounds.map(|b| (b.min, b.max)))
+            .map(|(l, u)| (l.into(), u.into()));
 
         let (jac_step, const_step) =
             math::linearize(point, |Concat(state, Concat(input, _slack))| {
@@ -194,13 +197,13 @@ pub fn sqp_step<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     state_trust: Array<S, f64>,
     input_trust: Array<I, f64>,
 ) {
-    let trust = Concat(state_trust, input_trust);
+    let trust = Concat(state_trust, input_trust).map(Float::from);
 
-    let mut maximum_step = 1.0;
+    let mut maximum_step = Float::from(1.0);
 
     for step in steps.iter() {
-        let previous = Concat(step.linearized_state, step.linearized_input);
-        let target = Concat(step.optimal_state, step.optimal_input);
+        let previous = Concat(step.linearized_state, step.linearized_input).map(Float::from);
+        let target = Concat(step.optimal_state, step.optimal_input).map(Float::from);
         let distance = previous.zip(target).map(|(p, t)| (p - t).abs());
         for (&dist, &trust) in zip(distance.iter(), trust.iter()) {
             if dist * maximum_step > trust {
@@ -210,13 +213,13 @@ pub fn sqp_step<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     }
 
     for step in steps {
-        let previous = Concat(step.linearized_state, step.linearized_input);
-        let target = Concat(step.optimal_state, step.optimal_input);
+        let previous = Concat(step.linearized_state, step.linearized_input).map(Float::from);
+        let target = Concat(step.optimal_state, step.optimal_input).map(Float::from);
         let target = previous
             .zip(target)
             .map(|(p, t)| p + (t - p) * maximum_step);
-        step.linearized_state = target.0;
-        step.linearized_input = target.1;
+        step.linearized_state = target.0.map(f64::from);
+        step.linearized_input = target.1.map(f64::from);
     }
 }
 
@@ -356,7 +359,7 @@ fn factorize_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
         // Due to rounding errors, we can't be sure that the comptuation above yields a
         // symmetric matrix. These rounding errors seem to grow uncontrollably in some
         // cases, so to avoid that we will enforce symmetry.
-        p_mat = (p_mat + p_mat.transpose()) * 0.5;
+        p_mat = (p_mat + p_mat.transpose()) * Float::from(0.5);
     }
 }
 
@@ -372,8 +375,8 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     let step = &mut steps[t];
 
     let adding = step.active_set.as_slice()[i].is_some();
-    let alpha = if adding { 1.0 } else { -1.0 };
-    let pi = Vector(from_fn(|j| if i == j { 1.0 } else { 0.0 }));
+    let alpha = Float::from(if adding { 1.0 } else { -1.0 });
+    let pi = Vector(from_fn(|j| Float::from(if i == j { 1.0 } else { 0.0 })));
 
     let b = step.input_step.col(i);
     let d = step.input_cost.col(i);
@@ -384,7 +387,7 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     let mut g = step.input_cost.transpose() * d + step.input_step.transpose() * step.p_mat * b;
     for (i, bound) in step.active_set.iter().enumerate() {
         if bound.is_some() {
-            g[i] = 0.0;
+            g[i] = Float::ZERO;
         }
     }
     if !adding {
@@ -408,7 +411,7 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     let numerator = h - step.h_mat * (step.g_inv * g);
     let denominator = (g0 - g.transpose() * step.g_inv * g).into_scalar();
 
-    let mut v_vec = numerator * (1.0 / libm::sqrt(denominator));
+    let mut v_vec = numerator * (1.0 / denominator.sqrt());
     step.k_mat -= (alpha / denominator) * (step.g_inv * g - pi) * numerator.transpose();
 
     if adding {
@@ -432,7 +435,7 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 
         for (i, bound) in step.active_set.iter().enumerate() {
             if bound.is_some() {
-                b[i] = 0.0;
+                b[i] = Float::ZERO;
             }
         }
 
@@ -442,7 +445,7 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
         step.h_mat += alpha * a * b.transpose();
 
         let tmp = a + step.k_mat.transpose() * b;
-        v_vec = libm::sqrt(1.0 - alpha * (b.transpose() * step.g_inv * b).into_scalar()) * tmp;
+        v_vec = (1.0 - alpha * (b.transpose() * step.g_inv * b).into_scalar()).sqrt() * tmp;
 
         step.k_mat -= alpha * (step.g_inv * b) * tmp.transpose();
     }
@@ -467,7 +470,7 @@ fn backward_recursion_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
             |(bound, (lower, upper))| match bound {
                 Some(Bound::Lower) => lower,
                 Some(Bound::Upper) => upper,
-                None => 0.0,
+                None => Float::ZERO,
             },
         ));
 
@@ -492,18 +495,18 @@ pub fn forward_recursion<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     initial_state: Array<S, f64>,
     settings: &Settings<I, B>,
 ) -> Option<Change> {
-    let mut x = vector(initial_state);
+    let mut x = vector(initial_state.map(Float::from));
     let tolerance = Concat(settings.input_tol, settings.bound_tol);
 
-    let mut worst_violation = (0.0, 0, 0, Bound::Lower);
-    let mut worst_dual = (0.0, 0, 0);
+    let mut worst_violation = (Float::ZERO, 0, 0, Bound::Lower);
+    let mut worst_dual = (Float::ZERO, 0, 0);
 
     for (i, step) in steps.iter_mut().enumerate() {
         let const_input = vector(step.active_set.zip(step.input_ranges).map(
             |(bound, (lower, upper))| match bound {
                 Some(Bound::Lower) => lower,
                 Some(Bound::Upper) => upper,
-                None => 0.0,
+                None => Float::ZERO,
             },
         ));
 
@@ -529,12 +532,12 @@ pub fn forward_recursion<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
             }
         }
 
-        step.optimal_state = x.into_array();
+        step.optimal_state = x.into_array().map(f64::from);
         step.optimal_input = u
             .into_array()
             .zip(step.input_ranges)
             .0
-            .map(|(val, (lower, upper))| val.clamp(lower, upper));
+            .map(|(val, (lower, upper))| val.clamp(lower, upper).as_f64());
 
         let y = step.state_cost * x + step.input_cost * u + step.const_cost;
         x = step.state_step * x + step.input_step * u + step.const_step;

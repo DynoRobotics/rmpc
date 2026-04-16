@@ -1,8 +1,12 @@
 use crate::GenArray;
-use crate::math::Matrix;
+use crate::math::{Float, Linear, Matrix};
 
 /// Scales a row in the matrix with the specified factor.
-fn row_multiplication<R: GenArray, C: GenArray>(matrix: &mut Matrix<R, C>, row: usize, scale: f64) {
+fn row_multiplication<R: GenArray, C: GenArray>(
+    matrix: &mut Matrix<R, C>,
+    row: usize,
+    scale: Float,
+) {
     for col in 0..C::LEN {
         matrix[(row, col)] *= scale;
     }
@@ -13,10 +17,11 @@ fn row_addition<R: GenArray, C: GenArray>(
     matrix: &mut Matrix<R, C>,
     source: usize,
     dest: usize,
-    scale: f64,
+    scale: Float,
 ) {
     for col in 0..C::LEN {
-        matrix[(dest, col)] += scale * matrix[(source, col)];
+        let src = matrix[(source, col)];
+        matrix[(dest, col)] += scale * src;
     }
 }
 
@@ -27,13 +32,13 @@ fn row_addition<R: GenArray, C: GenArray>(
 /// main diagonal.
 ///
 /// ```
-/// # use rmpc::math::{Matrix, inv_no_pivot, matrix};
+/// # use rmpc::math::{Float, Matrix, inv_no_pivot, matrix};
 /// // A positive semidefinite matrix, fulfills the criteria.
 /// let good_matrix = matrix([
 ///     [1.0, 0.5, 0.7],
 ///     [0.5, 0.5, 0.0],
 ///     [0.7, 0.0, 1.0],
-/// ]);
+/// ].map(|r| r.map(Float::from)));
 /// let zero = inv_no_pivot(good_matrix) * good_matrix - Matrix::IDENTITY;
 /// assert!(zero.0.iter().flatten().all(|elem| elem.abs() <= 1e-10));
 ///
@@ -43,7 +48,7 @@ fn row_addition<R: GenArray, C: GenArray>(
 ///     [1.0, 0.5, 1.0],
 ///     [2.0, 1.0, 2.5],
 ///     [1.5, 1.0, 0.5],
-/// ]);
+/// ].map(|r| r.map(Float::from)));
 /// let failed_inverse = inv_no_pivot(bad_matrix);
 /// let not_zero = failed_inverse * bad_matrix - Matrix::IDENTITY;
 /// assert!(not_zero.0.iter().flatten().any(|elem| elem.abs() >= 0.1));
@@ -52,7 +57,7 @@ fn row_addition<R: GenArray, C: GenArray>(
 ///     [ 16.0, -6.0, -2.0],
 ///     [-22.0,  8.0,  4.0],
 ///     [ -4.0,  2.0,  0.0],
-/// ]);
+/// ].map(|r| r.map(Float::from)));
 /// let zero = inverse * bad_matrix - Matrix::IDENTITY;
 /// assert!(zero.0.iter().flatten().all(|elem| elem.abs() <= 1e-10));
 /// ```
@@ -65,7 +70,11 @@ pub fn inv_no_pivot<N: GenArray>(matrix: Matrix<N, N>) -> Matrix<N, N> {
     for pivot in 0..N::LEN {
         // If the diagonal element is nonzero, eliminate it.
         let diag = lhs[(pivot, pivot)];
-        let scale = if diag != 0.0 { 1.0 / diag } else { 0.0 };
+        let scale = if diag != Float::ZERO {
+            1.0 / diag
+        } else {
+            Float::ZERO
+        };
 
         row_multiplication(&mut lhs, pivot, scale);
         row_multiplication(&mut rhs, pivot, scale);

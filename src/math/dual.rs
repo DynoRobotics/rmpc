@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use crate::math::{Linear, Matrix, Vector};
+use crate::math::{Float, Linear, Matrix, Vector};
 use crate::{Array, ArrayInst, GenArray};
 
 /// Same as [`differentiate`], but multiplies the jacobian by a matrix.
@@ -52,7 +52,7 @@ pub fn eval_linearized<I: GenArray, O: ArrayInst<Item = Dual<Vector<[(); 1]>>>>(
 /// A value tracking its gradient with respect to some set of variables.
 #[derive(Clone, Copy, Debug)]
 pub struct Dual<D> {
-    value: f64,
+    value: Float,
     grad: D,
 }
 
@@ -63,12 +63,12 @@ impl<D> Dual<D> {
     /// Note: This discards the derivative, so it will be treated as a constant if
     /// used in calculations.
     pub fn value(self) -> f64 {
-        self.value
+        self.value.as_f64()
     }
 
     /// Gets the sign of `self`. Its derivative is always zero.
     pub fn signum(self) -> f64 {
-        self.value.signum()
+        self.value.as_f64().signum()
     }
 
     /// Gets the minimum of `self` and `other`.
@@ -108,6 +108,12 @@ impl<D: Linear> Dual<D> {
 
 impl<D: Linear> From<f64> for Dual<D> {
     fn from(value: f64) -> Self {
+        Dual::from(Float::from(value))
+    }
+}
+
+impl<D: Linear> From<Float> for Dual<D> {
+    fn from(value: Float) -> Self {
         Dual {
             value,
             grad: D::ZERO,
@@ -135,23 +141,23 @@ macro_rules! impl_funcs {
 }
 impl_funcs! {
     /// The square root of the value.
-    fn sqrt(v) = (libm::sqrt(v), 0.5 / libm::sqrt(v));
+    fn sqrt(v) = { let s = v.sqrt(); (s, 0.5 / s) };
     /// The sine of an angle in radians.
-    fn sin(v) = (libm::sin(v), libm::cos(v));
+    fn sin(v) = (v.sin(), v.cos());
     /// The cosine of an angle in radians.
-    fn cos(v) = (libm::cos(v), -libm::sin(v));
+    fn cos(v) = (v.cos(), -v.sin());
     /// The tangent of an angle in radians.
-    fn tan(v) = (libm::tan(v), 1.0 / (libm::cos(v) * libm::cos(v)));
+    fn tan(v) = { let c = v.cos(); (v.tan(), 1.0 / (c * c)) };
     /// The arcsine in radians of a value.
-    fn asin(v) = (libm::asin(v), 1.0 / libm::sqrt(1.0 - v * v));
+    fn asin(v) = (v.asin(), 1.0 / (1.0 - v * v).sqrt());
     /// The arccosine in radians of a value.
-    fn acos(v) = (libm::acos(v), -1.0 / libm::sqrt(1.0 - v * v));
+    fn acos(v) = (v.acos(), -1.0 / (1.0 - v * v).sqrt());
     /// The arctangent in radians of a value.
-    fn atan(v) = (libm::atan(v), 1.0 / (1.0 + v * v));
+    fn atan(v) = (v.atan(), 1.0 / (1.0 + v * v));
     /// The exponential (e<sup>x</sup>) of the value.
-    fn exp(v) = (libm::exp(v), libm::exp(v));
+    fn exp(v) = { let e = v.exp(); (e, e) };
     /// The natural logarithm (base e) of the value.
-    fn ln(v) = (libm::log(v), 1.0 / v);
+    fn ln(v) = (v.ln(), 1.0 / v);
 }
 
 impl<D: Linear> core::ops::Neg for Dual<D> {
@@ -179,6 +185,18 @@ macro_rules! impl_op {
         impl<D: Linear> core::ops::$trait<f64> for Dual<D> {
             type Output = Self;
             fn $method(self, rhs: f64) -> Self {
+                core::ops::$trait::$method(self, Float::from(rhs))
+            }
+        }
+        impl<D: Linear> core::ops::$trait<Dual<D>> for f64 {
+            type Output = Dual<D>;
+            fn $method(self, rhs: Dual<D>) -> Dual<D> {
+                core::ops::$trait::$method(Float::from(self), rhs)
+            }
+        }
+        impl<D: Linear> core::ops::$trait<Float> for Dual<D> {
+            type Output = Self;
+            fn $method(self, rhs: Float) -> Self {
                 let $l = self.value;
                 let $r = rhs;
                 let (value, [grad_lhs, _grad_rhs]) = $v;
@@ -186,7 +204,7 @@ macro_rules! impl_op {
                 Dual { value, grad }
             }
         }
-        impl<D: Linear> core::ops::$trait<Dual<D>> for f64 {
+        impl<D: Linear> core::ops::$trait<Dual<D>> for Float {
             type Output = Dual<D>;
             fn $method(self, rhs: Dual<D>) -> Dual<D> {
                 let $l = self;
@@ -198,10 +216,10 @@ macro_rules! impl_op {
         }
     };
 }
-impl_op!(Add::add(l, r) = (l + r, [1.0, 1.0]));
-impl_op!(Sub::sub(l, r) = (l - r, [1.0, -1.0]));
+impl_op!(Add::add(l, r) = (l + r, [Float::from(1.0), Float::from(1.0)]));
+impl_op!(Sub::sub(l, r) = (l - r, [Float::from(1.0), Float::from(-1.0)]));
 impl_op!(Mul::mul(l, r) = (l * r, [r, l]));
-impl_op!(Div::div(l, r) = (l / r, [1.0 / r, -l / (r * r)]));
+impl_op!(Div::div(l, r) = (l / r, [Float::from(1.0) / r, -l / (r * r)]));
 
 macro_rules! impl_assign_op {
     ($atrait:ident::$amethod:ident = $trait:ident::$method:ident) => {
@@ -212,6 +230,11 @@ macro_rules! impl_assign_op {
         }
         impl<D: Linear> core::ops::$atrait<f64> for Dual<D> {
             fn $amethod(&mut self, rhs: f64) {
+                *self = core::ops::$trait::$method(*self, rhs);
+            }
+        }
+        impl<D: Linear> core::ops::$atrait<Float> for Dual<D> {
+            fn $amethod(&mut self, rhs: Float) {
                 *self = core::ops::$trait::$method(*self, rhs);
             }
         }

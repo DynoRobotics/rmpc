@@ -4,20 +4,20 @@ use core::ops::{
 };
 
 use crate::array::Concat;
-use crate::math::Linear;
+use crate::math::{Float, Linear};
 use crate::{Array, ArrayInst, GenArray, array};
 
 /// A dense matrix with a fixed size, stored in row major order.
-pub struct Matrix<R: GenArray, C: GenArray>(pub Array<R, Array<C, f64>>);
+pub struct Matrix<R: GenArray, C: GenArray>(pub Array<R, Array<C, Float>>);
 
 /// A column vector.
 pub type Vector<N> = Matrix<N, [(); 1]>;
 
 /// Constructor for the [`Vector`](tyalias@Vector) type alias.
 #[expect(non_snake_case)]
-pub const fn Vector<N: GenArray>(elements: Array<N, f64>) -> Vector<N> {
+pub const fn Vector<N: GenArray>(elements: Array<N, Float>) -> Vector<N> {
     let mut i = 0;
-    let mut v = Matrix(array::repeat([0.0]));
+    let mut v = Matrix::ZERO;
     while i < N::LEN {
         array::as_mut_slice(&mut v.0)[i] = [array::as_slice(&elements)[i]];
         i += 1;
@@ -28,7 +28,7 @@ pub const fn Vector<N: GenArray>(elements: Array<N, f64>) -> Vector<N> {
 /// Constructs a matrix. This is equivalent to calling the `Matrix` constructor
 /// directly except it allows the type to infer the matrix type from the
 /// argument type.
-pub const fn matrix<R: ArrayInst<Item = C>, C: ArrayInst<Item = f64>>(
+pub const fn matrix<R: ArrayInst<Item = C>, C: ArrayInst<Item = Float>>(
     rows: R,
 ) -> Matrix<R::Gen, C::Gen> {
     Matrix(rows)
@@ -37,13 +37,13 @@ pub const fn matrix<R: ArrayInst<Item = C>, C: ArrayInst<Item = f64>>(
 /// Constructs a vector. This is equivalent to calling the `Vector` constructor
 /// directly except it allows the type to infer the vector type from the
 /// argument type.
-pub const fn vector<A: ArrayInst<Item = f64>>(elements: A) -> Vector<A::Gen> {
+pub const fn vector<A: ArrayInst<Item = Float>>(elements: A) -> Vector<A::Gen> {
     Vector(elements)
 }
 
 impl<R: GenArray, C: GenArray> Matrix<R, C> {
     /// Constructs a matrix by calling the function for each cell.
-    pub fn from_fn(mut f: impl FnMut(usize, usize) -> f64) -> Self {
+    pub fn from_fn(mut f: impl FnMut(usize, usize) -> Float) -> Self {
         Matrix(R::from_fn(|r| C::from_fn(|c| f(r, c))))
     }
 
@@ -90,15 +90,15 @@ impl<R: GenArray, C: GenArray> Matrix<R, C> {
 }
 
 impl<N: GenArray> Vector<N> {
-    /// Turns `self` into an array of `f64`.
-    pub fn into_array(self) -> Array<N, f64> {
+    /// Turns `self` into an array of [`Float`].
+    pub fn into_array(self) -> Array<N, Float> {
         self.0.map(|[e]| e)
     }
 }
 
 impl Matrix<[(); 1], [(); 1]> {
-    /// Turns `self` into an array of `f64`.
-    pub fn into_scalar(self) -> f64 {
+    /// Turns `self` into an array of [`Float`].
+    pub fn into_scalar(self) -> Float {
         self.0[0][0]
     }
 }
@@ -138,11 +138,11 @@ impl<R: GenArray, C: GenArray> core::fmt::Debug for Matrix<R, C> {
 
 impl<N: GenArray> Matrix<N, N> {
     /// The identity matrix.
-    pub const IDENTITY: Self = Self::from_diag(Vector(array::repeat(1.0)));
+    pub const IDENTITY: Self = Self::from_diag(Vector(array::repeat(Float::from_f64(1.0))));
 
-    /// A matrix with values on the main diagonals and zeros everywhere else.
+    /// A matrix with values on the main diagonal and zeros everywhere else.
     pub const fn from_diag(diag: Vector<N>) -> Self {
-        let mut data: Self = Matrix(array::repeat(array::repeat(0.0)));
+        let mut data: Self = Matrix::ZERO;
         let mut i = 0;
         while i < N::LEN {
             let row = &mut array::as_mut_slice(&mut data.0)[i];
@@ -174,7 +174,7 @@ impl<R: GenArray, C: GenArray> AddAssign for Matrix<R, C> {
     fn add_assign(&mut self, rhs: Self) {
         for (dst, src) in zip(self.0.iter_mut(), rhs.0.iter()) {
             for (dst, src) in zip(dst.iter_mut(), src.iter()) {
-                *dst += src;
+                *dst += *src;
             }
         }
     }
@@ -193,23 +193,23 @@ impl<R: GenArray, C: GenArray> SubAssign for Matrix<R, C> {
     fn sub_assign(&mut self, rhs: Self) {
         for (dst, src) in zip(self.0.iter_mut(), rhs.0.iter()) {
             for (dst, src) in zip(dst.iter_mut(), src.iter()) {
-                *dst -= src;
+                *dst -= *src;
             }
         }
     }
 }
 
-impl<R: GenArray, C: GenArray> Mul<f64> for Matrix<R, C> {
+impl<R: GenArray, C: GenArray> Mul<Float> for Matrix<R, C> {
     type Output = Self;
 
-    fn mul(mut self, rhs: f64) -> Self {
+    fn mul(mut self, rhs: Float) -> Self {
         self *= rhs;
         self
     }
 }
 
-impl<R: GenArray, C: GenArray> MulAssign<f64> for Matrix<R, C> {
-    fn mul_assign(&mut self, rhs: f64) {
+impl<R: GenArray, C: GenArray> MulAssign<Float> for Matrix<R, C> {
+    fn mul_assign(&mut self, rhs: Float) {
         for dst in self.0.iter_mut() {
             for dst in dst.iter_mut() {
                 *dst *= rhs;
@@ -218,7 +218,7 @@ impl<R: GenArray, C: GenArray> MulAssign<f64> for Matrix<R, C> {
     }
 }
 
-impl<R: GenArray, C: GenArray> Mul<Matrix<R, C>> for f64 {
+impl<R: GenArray, C: GenArray> Mul<Matrix<R, C>> for Float {
     type Output = Matrix<R, C>;
 
     fn mul(self, mut rhs: Matrix<R, C>) -> Matrix<R, C> {
@@ -243,17 +243,17 @@ impl<R: GenArray, C: GenArray> MulAssign<Matrix<C, C>> for Matrix<R, C> {
     }
 }
 
-impl<R: GenArray, C: GenArray> Div<f64> for Matrix<R, C> {
+impl<R: GenArray, C: GenArray> Div<Float> for Matrix<R, C> {
     type Output = Self;
 
-    fn div(mut self, rhs: f64) -> Self {
+    fn div(mut self, rhs: Float) -> Self {
         self /= rhs;
         self
     }
 }
 
-impl<R: GenArray, C: GenArray> DivAssign<f64> for Matrix<R, C> {
-    fn div_assign(&mut self, rhs: f64) {
+impl<R: GenArray, C: GenArray> DivAssign<Float> for Matrix<R, C> {
+    fn div_assign(&mut self, rhs: Float) {
         for dst in self.0.iter_mut() {
             for dst in dst.iter_mut() {
                 *dst /= rhs;
@@ -263,33 +263,33 @@ impl<R: GenArray, C: GenArray> DivAssign<f64> for Matrix<R, C> {
 }
 
 impl<R: GenArray, C: GenArray> Linear for Matrix<R, C> {
-    const ZERO: Self = Matrix(array::repeat(array::repeat(0.0)));
+    const ZERO: Self = Matrix(array::repeat(array::repeat(Float::ZERO)));
 }
 
 impl<R: GenArray, C: GenArray> Index<(usize, usize)> for Matrix<R, C> {
-    type Output = f64;
+    type Output = Float;
 
-    fn index(&self, index: (usize, usize)) -> &f64 {
+    fn index(&self, index: (usize, usize)) -> &Float {
         &self.0.as_slice()[index.0].as_slice()[index.1]
     }
 }
 
 impl<N: GenArray> Index<usize> for Vector<N> {
-    type Output = f64;
+    type Output = Float;
 
-    fn index(&self, index: usize) -> &f64 {
+    fn index(&self, index: usize) -> &Float {
         self.index((index, 0))
     }
 }
 
 impl<R: GenArray, C: GenArray> IndexMut<(usize, usize)> for Matrix<R, C> {
-    fn index_mut(&mut self, index: (usize, usize)) -> &mut f64 {
+    fn index_mut(&mut self, index: (usize, usize)) -> &mut Float {
         &mut self.0.as_mut_slice()[index.0].as_mut_slice()[index.1]
     }
 }
 
 impl<N: GenArray> IndexMut<usize> for Vector<N> {
-    fn index_mut(&mut self, index: usize) -> &mut f64 {
+    fn index_mut(&mut self, index: usize) -> &mut Float {
         self.index_mut((index, 0))
     }
 }

@@ -1,7 +1,7 @@
 use core::iter::zip;
 
 use crate::array::repeat;
-use crate::math::{Dual, Linear};
+use crate::math::{Dual, Float, Linear};
 use crate::model::{Bounded, Discrete};
 use crate::{Array, ArrayInst, GenArray};
 
@@ -44,7 +44,7 @@ pub trait Continuous {
     /// ```rust
     /// # use rmpc::math::{Dual, Linear};
     /// # use rmpc::GenArray;
-    /// # use rmpc::model::Continuous;
+    /// # use rmpc::model::{Continuous, Bounded};
     /// #[derive(Clone, Copy, GenArray)]
     /// #[repr(C)]
     /// struct State<T> {
@@ -63,6 +63,7 @@ pub trait Continuous {
     ///     type State = State<()>;
     ///     type Input = Input<()>;
     ///     type Cost = [(); 2];
+    ///     type Bounds = [(); 0];
     ///
     ///     const IS_DISCRETE: State<bool> = State {
     ///         pos: false,     // Continuous time
@@ -94,6 +95,13 @@ pub trait Continuous {
     ///
     ///     fn input_ranges(&self, _time: f64, _idx: usize, _dt: f64) -> Input<(f64, f64)> {
     ///         Input { vel: (-2.0, 2.0) }
+    ///     }
+    ///
+    ///     fn bounds<D: Linear>(
+    ///         &self, _time: f64, _idx: usize, _dt: f64,
+    ///         _state: State<Dual<D>>, _input: Input<Dual<D>>,
+    ///     ) -> [Bounded<D>; 0] {
+    ///         []
     ///     }
     /// }
     /// ```
@@ -221,6 +229,7 @@ impl<M: Continuous> Discrete for RungeKutta4<M> {
         let perturb = |offsets: &[(f64, Array<Self::State, _>)]| {
             let mut state = state;
             for &(scale, delta) in offsets {
+                let scale = Float::from_f64(scale);
                 for ((state, &delta), &discrete) in
                     zip(state.iter_mut(), delta.iter()).zip(M::IS_DISCRETE.iter())
                 {
@@ -270,7 +279,7 @@ impl<M: Continuous> Discrete for RungeKutta4<M> {
         // To do: Would it be beneficial to use RK4 here aswell instead of this Riemann
         // integral style summation?
 
-        let scale = libm::sqrt(self.delta_time);
+        let scale = Float::from(self.delta_time).sqrt();
 
         self.model
             .cost_vector(
@@ -294,7 +303,7 @@ impl<M: Continuous> Discrete for RungeKutta4<M> {
         state: Array<Self::State, Dual<D>>,
         input: Array<Self::Input, Dual<D>>,
     ) -> Array<Self::Bounds, Bounded<D>> {
-        let scale = libm::sqrt(self.delta_time);
+        let scale = Float::from(self.delta_time).sqrt();
 
         self.model
             .bounds(
@@ -305,7 +314,7 @@ impl<M: Continuous> Discrete for RungeKutta4<M> {
                 input,
             )
             .map(|mut bound| {
-                bound.weight *= scale;
+                bound.weight = (bound.weight * scale).as_f64();
                 bound
             })
     }
