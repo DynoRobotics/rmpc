@@ -269,6 +269,7 @@ impl<R: GenArray, C: GenArray> Linear for Matrix<R, C> {
 impl<R: GenArray, C: GenArray> Index<(usize, usize)> for Matrix<R, C> {
     type Output = Float;
 
+    #[inline(always)]
     fn index(&self, index: (usize, usize)) -> &Float {
         &self.0.as_slice()[index.0].as_slice()[index.1]
     }
@@ -277,18 +278,21 @@ impl<R: GenArray, C: GenArray> Index<(usize, usize)> for Matrix<R, C> {
 impl<N: GenArray> Index<usize> for Vector<N> {
     type Output = Float;
 
+    #[inline(always)]
     fn index(&self, index: usize) -> &Float {
         self.index((index, 0))
     }
 }
 
 impl<R: GenArray, C: GenArray> IndexMut<(usize, usize)> for Matrix<R, C> {
+    #[inline(always)]
     fn index_mut(&mut self, index: (usize, usize)) -> &mut Float {
         &mut self.0.as_mut_slice()[index.0].as_mut_slice()[index.1]
     }
 }
 
 impl<N: GenArray> IndexMut<usize> for Vector<N> {
+    #[inline(always)]
     fn index_mut(&mut self, index: usize) -> &mut Float {
         self.index_mut((index, 0))
     }

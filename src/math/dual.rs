@@ -1,52 +1,32 @@
 use core::fmt::Debug;
 
+use crate::array::from_fn;
 use crate::math::{Float, Linear, Matrix, Vector};
 use crate::{Array, ArrayInst, GenArray};
-
-/// Same as [`differentiate`], but multiplies the jacobian by a matrix.
-fn differentiate_times<I: GenArray, D: GenArray, O: ArrayInst<Item = Dual<Vector<D>>>>(
-    point: Vector<I>,
-    point_jac: Matrix<I, D>,
-    function: impl FnOnce(Array<I, Dual<Vector<D>>>) -> O,
-) -> (Vector<O::Gen>, Matrix<O::Gen, D>) {
-    let input = I::from_fn(|i| Dual {
-        value: point[i],
-        grad: point_jac.row(i),
-    });
-    let output = function(input);
-    let value = Matrix(output.map(|out| [out.value]));
-    let jacobian = Matrix(output.map(|out| out.grad.into_array()));
-    (value, jacobian)
-}
 
 /// Differentiates the function around a certain point, returning the value and
 /// Jacobian at that point.
 pub fn differentiate<I: GenArray, O: ArrayInst<Item = Dual<Vector<I>>>>(
     point: Vector<I>,
-    function: impl FnOnce(Array<I, Dual<Vector<I>>>) -> O,
+    mut function: impl FnMut(Array<I, Dual<Vector<I>>>) -> O,
 ) -> (Vector<O::Gen>, Matrix<O::Gen, I>) {
-    differentiate_times(point, Matrix::IDENTITY, function)
+    let input = I::from_fn(|i| Dual {
+        value: point[i],
+        grad: Vector(from_fn(|j| Float::from_f64((i == j) as u8 as f64))),
+    });
+    let output = function(input);
+    let value = Vector(output.map(|out| out.value));
+    let jacobian = Matrix(output.map(|out| out.grad.into_array()));
+    (value, jacobian)
 }
 
 /// Approximates the function as `A*x + b` around some point.
 pub fn linearize<I: GenArray, O: ArrayInst<Item = Dual<Vector<I>>>>(
     point: Vector<I>,
-    function: impl FnOnce(Array<I, Dual<Vector<I>>>) -> O,
+    function: impl FnMut(Array<I, Dual<Vector<I>>>) -> O,
 ) -> (Matrix<O::Gen, I>, Vector<O::Gen>) {
     let (value, jacobian) = differentiate(point, function);
     (jacobian, value - jacobian * point)
-}
-
-/// Approximates the function as `A*x + b` around some point, and then evaluates
-/// that approximation at some other point.
-pub fn eval_linearized<I: GenArray, O: ArrayInst<Item = Dual<Vector<[(); 1]>>>>(
-    lin_point: Vector<I>,
-    eval_point: Vector<I>,
-    function: impl FnOnce(Array<I, Dual<Vector<[(); 1]>>>) -> O,
-) -> Vector<O::Gen> {
-    let delta = eval_point - lin_point;
-    let (value, delta) = differentiate_times(lin_point, delta, function);
-    value + delta.col(0)
 }
 
 /// A value tracking its gradient with respect to some set of variables.
