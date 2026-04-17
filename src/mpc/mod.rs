@@ -4,7 +4,7 @@ use core::iter::zip;
 
 use crate::array::{Concat, from_fn, repeat};
 use crate::math::{self, Dual, Float, Linear, Matrix, Vector, Zero, inv_no_pivot, vector};
-use crate::model::Discrete;
+use crate::model::{Continuous, Discrete};
 use crate::{Array, ArrayInst, GenArray};
 
 pub mod export;
@@ -96,6 +96,22 @@ pub struct MpcStep<S: GenArray, I: GenArray, C: GenArray, B: GenArray> {
     psi_vec: Vector<S>,
     k_vec: Vector<Concat<I, B>>,
 }
+
+/// A type alias for the step type needed for a specific discrete time model.
+pub type MpcStepFor<T> = MpcStep<
+    <T as Discrete>::State,
+    <T as Discrete>::Input,
+    <T as Discrete>::Cost,
+    <T as Discrete>::Bounds,
+>;
+
+/// Same as [`MpcStepFor`] but expects a continuous time model instead.
+pub type MpcStepForCont<T> = MpcStep<
+    <T as Continuous>::State,
+    <T as Continuous>::Input,
+    <T as Continuous>::Cost,
+    <T as Continuous>::Bounds,
+>;
 
 impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
     /// Creates an instance of [`RiccatiStep`] with all matrices set to zero.
