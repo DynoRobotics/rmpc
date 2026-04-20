@@ -3,7 +3,9 @@
 use core::iter::zip;
 
 use crate::array::{Concat, from_fn, repeat};
-use crate::math::{self, Dual, Float, Linear, Matrix, Vector, Zero, inv_no_pivot, vector};
+use crate::math::{
+    self, Dual, Float, Linear, Matrix, Vector, Zero, differentiate, inv_no_pivot, vector,
+};
 use crate::model::{Continuous, Discrete};
 use crate::{Array, ArrayInst, GenArray};
 
@@ -197,10 +199,7 @@ impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
 /// Convenience function to call [`linearize`][MpcStep::linearize] on every
 /// step.
 #[allow(clippy::type_complexity)]
-pub fn linearize<M: Discrete>(
-    model: &M,
-    steps: &mut [MpcStep<M::State, M::Input, M::Cost, M::Bounds>],
-) {
+pub fn linearize<M: Discrete>(model: &M, steps: &mut [MpcStepFor<M>]) {
     for (i, step) in steps.iter_mut().enumerate() {
         step.linearize(model, i);
     }
@@ -237,6 +236,90 @@ pub fn sqp_step<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
         step.linearized_state = target.0.map(f64::from);
         step.linearized_input = target.1.map(f64::from);
     }
+}
+
+/// Moves the trajectory used for linearization towards the optimum found by the
+/// QP solver.
+pub fn sqp_filter_step<M: Discrete>(
+    model: &M,
+    steps: &mut [MpcStepFor<M>],
+    initial_state: Array<M::State, f64>,
+) {
+    let (current, deriv) = differentiate(vector([Float::ZERO]), |[step_size]| {
+        let (cost, violation) = cost_violation(model, steps, step_size, initial_state);
+        [cost, violation]
+    });
+
+    // If the direction is an ascent direction then there is no appropriate step length.
+    if deriv.into_array().iter().all(|&d| d > 0.0) {
+        return;
+    }
+
+    let mut step_size = Float::from(1.0);
+    loop {
+        let actual = {
+            let (cost, violation) =
+                cost_violation::<_, Zero>(model, steps, step_size.into(), initial_state);
+            [cost, violation].map(|v| Float::from(v.value()))
+        };
+        let goal = current + step_size * deriv * Float::from(0.5);
+
+        if zip(actual.iter(), goal.into_array().iter()).any(|(&a, &g)| a < g) {
+            break;
+        }
+
+        step_size *= 0.5;
+
+        if step_size < 1e-4 {
+            break;
+        }
+    }
+
+    for step in steps {
+        let previous = Concat(step.linearized_state, step.linearized_input).map(Float::from);
+        let target = Concat(step.optimal_state, step.optimal_input).map(Float::from);
+        let Concat(state, input) = previous.zip(target).map(|(p, t)| p + (t - p) * step_size);
+        step.linearized_state = state.map(f64::from);
+        step.linearized_input = input.map(f64::from);
+    }
+}
+
+/// Computes the cost and total equality violation after taking a step towards
+/// the trajectory found by the QP solver. This does not include violations of
+/// inequality constraints as they shouldn't be violated.
+fn cost_violation<M: Discrete, D: Linear>(
+    model: &M,
+    steps: &[MpcStepFor<M>],
+    step_size: Dual<D>,
+    initial_state: Array<M::State, f64>,
+) -> (Dual<D>, Dual<D>) {
+    let mut total_cost = Dual::from(0.0);
+    let mut total_violation = Dual::from(0.0);
+
+    let mut expected_state = initial_state.map(Dual::from);
+    for (i, step) in steps.iter().enumerate() {
+        let previous = Concat(step.linearized_state, step.linearized_input).map(Float::from);
+        let target = Concat(step.optimal_state, step.optimal_input).map(Float::from);
+        let Concat(state, input) = previous.zip(target).map(|(p, t)| p + (t - p) * step_size);
+
+        for (&x1, &x2) in zip(state.iter(), expected_state.iter()) {
+            total_violation += (x1 - x2) * (x1 - x2);
+        }
+
+        for &value in model.cost_vector(i, state, input).iter() {
+            total_cost += value * value;
+        }
+
+        for &bound in model.bounds(i, state, input).iter() {
+            let violation = bound.value - bound.value.clamp(bound.min, bound.max);
+            let violation = violation * bound.weight;
+            total_cost += violation * violation;
+        }
+
+        expected_state = model.time_step(i, state, input);
+    }
+
+    (total_cost, total_violation)
 }
 
 /// Performs multiple iterations of the QP solver. The first return value is the
