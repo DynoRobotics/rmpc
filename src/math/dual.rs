@@ -101,43 +101,107 @@ impl<D: Linear> From<Float> for Dual<D> {
     }
 }
 
+/// Helper to implement operations on dual numbers. The body should contain a
+/// number of functions with syntax like
+///
+/// ```
+/// fn sub_mul(x, y, z) {
+///     (x - y * z, [1.0, -z, -y])
+/// }
+/// ```
+///
+/// The return value at the end of the function should be a tuple with the value
+/// and gradient of the function. If the function takes arguments with a type
+/// other than `Dual`, then they can be provided after a semicolon. For example.
+///
+/// ```
+/// fn add_powi(a, b; n: i32, m: i32) {
+///     (a.powi(n) + b.powi(m), [(n as f64) * a.powi(n - 1), (m as f64) * b.powi(n - 1)])
+/// }
+/// ```
+///
+/// Note that there is no derivative with respect to those arguments as only
+/// `Dual` values have derivatives.
 macro_rules! impl_funcs {
     ($(
         $(#[$attr:meta])*
-        fn $name:ident($i:ident) = $v:expr;
+        fn $name:ident(
+            $s:ident $(, $a:ident)*
+            $(; $($cname:ident : $cty:ty),*)?
+        ) { $($v:tt)* }
     )+) => {
         impl<D: Linear> Dual<D> {
             $(
                 $(#[$attr])*
-                pub fn $name(self) -> Self {
-                    let $i = self.value;
-                    let (value, deriv) = $v;
-                    let grad = self.grad * deriv;
+                pub fn $name(self $(, $a: impl Into<Self>)* $($(,$cname: $cty)+)?) -> Self {
+                    $( let $a = $a.into(); )*
+
+                    let (value, deriv) = {
+                        let $s = self.value;
+                        $( let $a = $a.value; )*
+                        $($v)*
+                    };
+                    let grad = core::iter::zip([self.grad $(, $a.grad)*], deriv)
+                        .map(|(grad, deriv)| grad * deriv)
+                        .reduce(|g1, g2| g1 + g2)
+                        .expect("at least 1 gradient to sum");
                     Dual { value, grad }
                 }
             )+
         }
     };
 }
+
 impl_funcs! {
     /// The square root of the value.
-    fn sqrt(v) = { let s = v.sqrt(); (s, 0.5 / s) };
-    /// The sine of an angle in radians.
-    fn sin(v) = (v.sin(), v.cos());
-    /// The cosine of an angle in radians.
-    fn cos(v) = (v.cos(), -v.sin());
-    /// The tangent of an angle in radians.
-    fn tan(v) = { let c = v.cos(); (v.tan(), 1.0 / (c * c)) };
-    /// The arcsine in radians of a value.
-    fn asin(v) = (v.asin(), 1.0 / (1.0 - v * v).sqrt());
-    /// The arccosine in radians of a value.
-    fn acos(v) = (v.acos(), -1.0 / (1.0 - v * v).sqrt());
-    /// The arctangent in radians of a value.
-    fn atan(v) = (v.atan(), 1.0 / (1.0 + v * v));
+    fn sqrt(v) {
+        let s = v.sqrt();
+        (s, [0.5 / s])
+    }
     /// The exponential (e<sup>x</sup>) of the value.
-    fn exp(v) = { let e = v.exp(); (e, e) };
+    fn exp(v) {
+        let e = v.exp();
+        (e, [e])
+    }
     /// The natural logarithm (base e) of the value.
-    fn ln(v) = (v.ln(), 1.0 / v);
+    fn ln(v) {
+        (v.ln(), [1.0 / v])
+    }
+    /// Raises `self` to an integer power.
+    fn powi(v; n: i32) {
+        let pow_m1 = v.powi(n - 1);
+        (v * pow_m1, [(n as f64) * pow_m1])
+    }
+    /// The sine of an angle in radians.
+    fn sin(v) {
+        (v.sin(), [v.cos()])
+    }
+    /// The cosine of an angle in radians.
+    fn cos(v) {
+        (v.cos(), [-v.sin()])
+    }
+    /// The tangent of an angle in radians.
+    fn tan(v) {
+        let c = v.cos();
+        (v.tan(), [1.0 / (c * c)])
+    }
+    /// The arcsine in radians of a value.
+    fn asin(v) {
+        (v.asin(), [1.0 / (1.0 - v * v).sqrt()])
+    }
+    /// The arccosine in radians of a value.
+    fn acos(v) {
+        (v.acos(), [-1.0 / (1.0 - v * v).sqrt()])
+    }
+    /// The arctangent in radians of a value.
+    fn atan(v) {
+        (v.atan(), [1.0 / (1.0 + v * v)])
+    }
+    /// Computes the four quadrant arctangent of `self / other`, in radians.
+    fn atan2(y, x) {
+        let denom = x * x + y * y;
+        (y.atan2(x), [-y / denom, x / denom])
+    }
 }
 
 impl<D: Linear> core::ops::Neg for Dual<D> {

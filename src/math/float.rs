@@ -7,6 +7,8 @@ type Inner = f32;
 #[cfg(feature = "f64")]
 type Inner = f64;
 
+type Libm = libm::Libm<Inner>;
+
 /// A wrapper that contains a `f32` or `f64` depending on if the `f64` feature
 /// is enabled.
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
@@ -56,74 +58,72 @@ impl Float {
     /// Computes the square root of `self`.
     #[inline]
     pub fn sqrt(self) -> Float {
-        #[cfg(not(feature = "f64"))]
-        return Float(libm::sqrtf(self.0));
-        #[cfg(feature = "f64")]
-        return Float(libm::sqrt(self.0));
+        Float(Libm::sqrt(self.0))
     }
 
     /// Computes the exponential function.
     pub fn exp(self) -> Float {
-        #[cfg(not(feature = "f64"))]
-        return Float(libm::expf(self.0));
-        #[cfg(feature = "f64")]
-        return Float(libm::exp(self.0));
+        Float(Libm::exp(self.0))
     }
 
     /// Computes the natural logarithm.
     pub fn ln(self) -> Float {
-        #[cfg(not(feature = "f64"))]
-        return Float(libm::logf(self.0));
-        #[cfg(feature = "f64")]
-        return Float(libm::log(self.0));
+        Float(Libm::log(self.0))
+    }
+
+    /// Computes `self` to the power of `exp`.
+    pub fn powi(mut self, exp: i32) -> Float {
+        if exp < 0 {
+            self = 1.0 / self;
+        }
+
+        let mut exp = exp.unsigned_abs();
+
+        let mut result = Float(1.0);
+        while exp > 0 {
+            if exp % 2 == 1 {
+                result *= self;
+            }
+            self *= self;
+            exp /= 2;
+        }
+
+        result
     }
 
     /// Computes the sine, with the arguments in radians.
     pub fn sin(self) -> Float {
-        #[cfg(not(feature = "f64"))]
-        return Float(libm::sinf(self.0));
-        #[cfg(feature = "f64")]
-        return Float(libm::sin(self.0));
+        Float(Libm::sin(self.0))
     }
 
     /// Computes the cosine, with the arguments in radians.
     pub fn cos(self) -> Float {
-        #[cfg(not(feature = "f64"))]
-        return Float(libm::cosf(self.0));
-        #[cfg(feature = "f64")]
-        return Float(libm::cos(self.0));
+        Float(Libm::cos(self.0))
     }
 
     /// Computes the tangent, with the arguments in radians.
     pub fn tan(self) -> Float {
-        #[cfg(not(feature = "f64"))]
-        return Float(libm::tanf(self.0));
-        #[cfg(feature = "f64")]
-        return Float(libm::tan(self.0));
+        Float(Libm::tan(self.0))
     }
 
-    /// Computes the arcsine, returning an angle in radians.
+    /// Computes the arcsine, in radians.
     pub fn asin(self) -> Float {
-        #[cfg(not(feature = "f64"))]
-        return Float(libm::asinf(self.0));
-        #[cfg(feature = "f64")]
-        return Float(libm::asin(self.0));
+        Float(Libm::asin(self.0))
     }
 
-    /// Computes the arccosine, returning an angle in radians.
+    /// Computes the arccosine, in radians.
     pub fn acos(self) -> Float {
-        #[cfg(not(feature = "f64"))]
-        return Float(libm::acosf(self.0));
-        #[cfg(feature = "f64")]
-        return Float(libm::acos(self.0));
+        Float(Libm::acos(self.0))
     }
 
-    /// Computes the arctangent, returning an angle in radians.
+    /// Computes the arctangent, in radians.
     pub fn atan(self) -> Float {
-        #[cfg(not(feature = "f64"))]
-        return Float(libm::atanf(self.0));
-        #[cfg(feature = "f64")]
-        return Float(libm::atan(self.0));
+        Float(Libm::atan(self.0))
+    }
+
+    /// Computes the four quadrant arctangent of `self / other`, in radians.
+    pub fn atan2(self, other: Float) -> Float {
+        Float(Libm::atan2(self.0, other.0))
     }
 }
 

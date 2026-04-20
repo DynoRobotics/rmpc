@@ -303,17 +303,17 @@ fn cost_violation<M: Discrete, D: Linear>(
         let Concat(state, input) = previous.zip(target).map(|(p, t)| p + (t - p) * step_size);
 
         for (&x1, &x2) in zip(state.iter(), expected_state.iter()) {
-            total_violation += (x1 - x2) * (x1 - x2);
+            total_violation += (x1 - x2).powi(2);
         }
 
         for &value in model.cost_vector(i, state, input).iter() {
-            total_cost += value * value;
+            total_cost += value.powi(2);
         }
 
         for &bound in model.bounds(i, state, input).iter() {
             let violation = bound.value - bound.value.clamp(bound.min, bound.max);
             let violation = violation * bound.weight;
-            total_cost += violation * violation;
+            total_cost += violation.powi(2);
         }
 
         expected_state = model.time_step(i, state, input);
