@@ -88,14 +88,17 @@ pub struct MpcStep<S: GenArray, I: GenArray, C: GenArray, B: GenArray> {
     /// The `c` vector in the cost function `|C*x + D*u + c|^2`.
     const_cost: Vector<Concat<C, B>>,
 
+    /// The `P` matrix in the cost-to-go function `x^T*P*x - psi^T*x + const`.
+    p_mat: Matrix<S, S>,
+    /// The `psi` vector in the cost-to-go function `x^T*P*x - psi^T*x + const`.
+    psi_vec: Vector<S>,
+
     // Note: These are for the next time step according to the notation in the
     // paper. This simplifies the implementation as those values are almost always
     // the value of interest.
-    p_mat: Matrix<S, S>,
     h_mat: Matrix<S, Concat<I, B>>,
     g_inv: Matrix<Concat<I, B>, Concat<I, B>>,
     k_mat: Matrix<Concat<I, B>, S>,
-    psi_vec: Vector<S>,
     k_vec: Vector<Concat<I, B>>,
 }
 
@@ -132,10 +135,10 @@ impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
             input_cost: Linear::ZERO,
             const_cost: Linear::ZERO,
             p_mat: Linear::ZERO,
+            psi_vec: Linear::ZERO,
             g_inv: Linear::ZERO,
             h_mat: Linear::ZERO,
             k_mat: Linear::ZERO,
-            psi_vec: Linear::ZERO,
             k_vec: Linear::ZERO,
         }
     }
@@ -260,7 +263,7 @@ pub fn sqp_filter_step<M: Discrete>(
         let actual = {
             let (cost, violation) =
                 cost_violation::<_, Zero>(model, steps, step_size.into(), initial_state);
-            [cost, violation].map(|v| Float::from(v.value()))
+            [cost, violation].map(Dual::float_value)
         };
         let goal = current + step_size * deriv * Float::from(0.5);
 
@@ -412,24 +415,21 @@ fn factorize_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     last: usize,
 ) {
     // To do: Possibly support a mayer term
-    let mut p_mat = if last == steps.len() - 1 {
-        Matrix::ZERO
-    } else {
-        steps[last].p_mat
-    };
+    let mayer_p = Matrix::ZERO;
 
-    for step in steps[..=last].iter_mut().rev() {
-        step.p_mat = p_mat;
+    let (to_recompute, after) = steps.split_at_mut(last + 1);
+    let mut next_p = after.first().map_or(&mayer_p, |step| &step.p_mat);
 
+    for step in to_recompute.iter_mut().rev() {
         let cost_xx = step.state_cost.transpose() * step.state_cost;
         let cost_xu = step.state_cost.transpose() * step.input_cost;
         let cost_uu = step.input_cost.transpose() * step.input_cost;
 
-        let tmp = step.state_step.transpose() * p_mat;
+        let tmp = step.state_step.transpose() * *next_p;
         let f_mat = cost_xx + tmp * step.state_step;
         step.h_mat = cost_xu + tmp * step.input_step;
 
-        let mut g_mat = cost_uu + step.input_step.transpose() * p_mat * step.input_step;
+        let mut g_mat = cost_uu + step.input_step.transpose() * *next_p * step.input_step;
 
         for (i, bound) in step.active_set.iter_mut().enumerate() {
             // Sanity check to release infinite bounds immediately
@@ -453,12 +453,14 @@ fn factorize_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
         step.g_inv = inv_no_pivot(g_mat);
         step.k_mat = -step.g_inv * step.h_mat.transpose();
 
-        p_mat = f_mat + step.h_mat * step.k_mat;
+        step.p_mat = f_mat + step.h_mat * step.k_mat;
 
         // Due to rounding errors, we can't be sure that the comptuation above yields a
         // symmetric matrix. These rounding errors seem to grow uncontrollably in some
         // cases, so to avoid that we will enforce symmetry.
-        p_mat = (p_mat + p_mat.transpose()) * Float::from(0.5);
+        step.p_mat = (step.p_mat + step.p_mat.transpose()) * Float::from(0.5);
+
+        next_p = &step.p_mat;
     }
 }
 
@@ -471,6 +473,9 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     let t = change.time;
     let i = change.input;
 
+    let mayer_p = Matrix::ZERO;
+    let next_p = steps.get(t + 1).map_or(mayer_p, |step| step.p_mat);
+
     let step = &mut steps[t];
 
     let adding = step.active_set.as_slice()[i].is_some();
@@ -480,10 +485,10 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     let b = step.input_step.col(i);
     let d = step.input_cost.col(i);
 
-    let g0 = d.transpose() * d + b.transpose() * step.p_mat * b;
-    let h = step.state_cost.transpose() * d + step.state_step.transpose() * step.p_mat * b;
+    let g0 = d.transpose() * d + b.transpose() * next_p * b;
+    let h = step.state_cost.transpose() * d + step.state_step.transpose() * next_p * b;
 
-    let mut g = step.input_cost.transpose() * d + step.input_step.transpose() * step.p_mat * b;
+    let mut g = step.input_cost.transpose() * d + step.input_step.transpose() * next_p * b;
     for (i, bound) in step.active_set.iter().enumerate() {
         if bound.is_some() {
             g[i] = Float::ZERO;
@@ -525,10 +530,10 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
         step.h_mat.set_col(i, h);
     }
 
+    step.p_mat += alpha * v_vec * v_vec.transpose();
+
     // Propagate the update to earlier time steps
     for step in steps[..t].iter_mut().rev() {
-        step.p_mat += alpha * v_vec * v_vec.transpose();
-
         let a = step.state_step.transpose() * v_vec;
         let mut b = step.input_step.transpose() * v_vec;
 
@@ -547,6 +552,7 @@ fn update_factorization<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
         v_vec = (1.0 - alpha * (b.transpose() * step.g_inv * b).into_scalar()).sqrt() * tmp;
 
         step.k_mat -= alpha * (step.g_inv * b) * tmp.transpose();
+        step.p_mat += alpha * v_vec * v_vec.transpose();
     }
 }
 
@@ -556,15 +562,15 @@ fn backward_recursion_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     last: usize,
 ) {
     // To do: Possibly support a mayer term
-    let mut psi_vec = if last == steps.len() - 1 {
-        Vector::ZERO
-    } else {
-        steps[last].psi_vec
-    };
+    let mayer_p = Matrix::ZERO;
+    let mayer_psi = Vector::ZERO;
 
-    for step in steps[..=last].iter_mut().rev() {
-        step.psi_vec = psi_vec;
+    let (to_recompute, after) = steps.split_at_mut(last + 1);
 
+    let mut next_p = after.first().map_or(&mayer_p, |step| &step.p_mat);
+    let mut next_psi = after.first().map_or(&mayer_psi, |step| &step.psi_vec);
+
+    for step in to_recompute.iter_mut().rev() {
         let const_input = vector(step.active_set.zip(step.input_ranges).map(
             |(bound, (lower, upper))| match bound {
                 Some(Bound::Lower) => lower,
@@ -575,14 +581,17 @@ fn backward_recursion_upto<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
 
         let av = step.input_step * const_input + step.const_step;
         let cv = step.input_cost * const_input + step.const_cost;
-        let tmp = step.psi_vec - step.p_mat * av;
+        let tmp = *next_psi - *next_p * av;
 
         step.k_vec = step.g_inv
             * (step.input_step.transpose() * tmp - step.input_cost.transpose() * step.const_cost);
 
-        psi_vec = step.state_step.transpose() * tmp
+        step.psi_vec = step.state_step.transpose() * tmp
             - step.state_cost.transpose() * cv
             - step.h_mat * step.k_vec;
+
+        next_p = &step.p_mat;
+        next_psi = &step.psi_vec;
     }
 }
 
@@ -600,7 +609,15 @@ pub fn forward_recursion<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     let mut worst_violation = (Float::ZERO, 0, 0, Bound::Lower);
     let mut worst_dual = (Float::ZERO, 0, 0);
 
-    for (i, step) in steps.iter_mut().enumerate() {
+    // To do: Possibly support a mayer term
+    let mayer_p = Matrix::ZERO;
+    let mayer_psi = Vector::ZERO;
+
+    for i in 0..steps.len() {
+        let next_p = steps.get(i + 1).map_or(mayer_p, |step| step.p_mat);
+        let next_psi = steps.get(i + 1).map_or(mayer_psi, |step| step.psi_vec);
+        let step = &mut steps[i];
+
         let const_input = vector(step.active_set.zip(step.input_ranges).map(
             |(bound, (lower, upper))| match bound {
                 Some(Bound::Lower) => lower,
@@ -642,7 +659,7 @@ pub fn forward_recursion<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
         x = step.state_step * x + step.input_step * u + step.const_step;
 
         // Check for constraints binding in the wrong direction
-        let lambda = step.p_mat * x - step.psi_vec;
+        let lambda = next_p * x - next_psi;
         let dual = step.input_cost.transpose() * y + step.input_step.transpose() * lambda;
         for (j, bound) in step.active_set.iter().enumerate() {
             let dual = match bound {

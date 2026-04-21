@@ -46,6 +46,11 @@ impl<D> Dual<D> {
         self.value.as_f64()
     }
 
+    /// Same as [`value`](Self::value), but returns the value as a [`Float`].
+    pub fn float_value(self) -> Float {
+        self.value
+    }
+
     /// Gets the sign of `self`. Its derivative is always zero.
     pub fn signum(self) -> f64 {
         self.value.as_f64().signum()
