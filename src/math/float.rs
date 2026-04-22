@@ -47,6 +47,20 @@ impl Float {
         Float(self.0.abs())
     }
 
+    /// Gets the minimum of `self` and `other`.
+    #[inline]
+    pub fn min(self, other: impl Into<Float>) -> Float {
+        let other = other.into();
+        Float(self.0.min(other.0))
+    }
+
+    /// Gets the maximum of `self` and `other`.
+    #[inline]
+    pub fn max(self, other: impl Into<Float>) -> Float {
+        let other = other.into();
+        Float(self.0.max(other.0))
+    }
+
     /// Clamps `self` to the range `min`..`max`.
     #[inline]
     pub fn clamp(self, min: impl Into<Float>, max: impl Into<Float>) -> Float {
