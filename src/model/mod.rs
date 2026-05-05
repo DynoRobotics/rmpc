@@ -108,6 +108,46 @@ pub trait Discrete {
         let cost = self.cost_vector::<Zero>(time, state, input);
         cost.map(Dual::value)
     }
+
+    /// Evaluates the cost function, including the soft constraints.
+    ///
+    /// Note: This should not be implemented manually. Implement
+    /// [`cost_vector`](Self::cost_vector) and [`bounds`](Self::bounds) instead.
+    fn cost<D: Linear>(
+        &self,
+        time: usize,
+        state: Array<Self::State, Dual<D>>,
+        input: Array<Self::Input, Dual<D>>,
+    ) -> Dual<D> {
+        let mut cost = self
+            .cost_vector(time, state, input)
+            .iter()
+            .map(|v| v.powi(2))
+            .sum::<Dual<D>>();
+
+        cost += self
+            .bounds(time, state, input)
+            .iter()
+            .map(|b| {
+                let violation = b.value - b.value.clamp(b.min, b.max);
+                (violation * b.weight).powi(2)
+            })
+            .sum::<Dual<D>>();
+
+        cost
+    }
+
+    /// A convenience method for evaluating the cost function without tracking any
+    /// gradient.
+    fn cost_f64(
+        &self,
+        time: usize,
+        state: Array<Self::State, f64>,
+        input: Array<Self::Input, f64>,
+    ) -> f64 {
+        self.cost::<Zero>(time, state.map(Dual::from), input.map(Dual::from))
+            .value()
+    }
 }
 
 impl<M: Discrete> Discrete for &M {

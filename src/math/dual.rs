@@ -293,3 +293,9 @@ impl_assign_op!(AddAssign::add_assign = Add::add);
 impl_assign_op!(SubAssign::sub_assign = Sub::sub);
 impl_assign_op!(MulAssign::mul_assign = Mul::mul);
 impl_assign_op!(DivAssign::div_assign = Div::div);
+
+impl<D: Linear> core::iter::Sum for Dual<D> {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(-Dual::from(0.0), core::ops::Add::add)
+    }
+}

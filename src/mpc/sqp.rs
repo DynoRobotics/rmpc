@@ -166,15 +166,7 @@ fn cost_violation<M: Discrete, D: Linear>(
             total_violation += (x1 - x2).abs();
         }
 
-        for &value in model.cost_vector(i, state, input).iter() {
-            total_cost += value.powi(2);
-        }
-
-        for &bound in model.bounds(i, state, input).iter() {
-            let violation = bound.value - bound.value.clamp(bound.min, bound.max);
-            let violation = violation * bound.weight;
-            total_cost += violation.powi(2);
-        }
+        total_cost += model.cost(i, state, input);
 
         expected_state = model.time_step(i, state, input);
     }
