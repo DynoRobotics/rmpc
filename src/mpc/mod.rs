@@ -20,7 +20,7 @@ pub struct Settings<I: GenArray, B: GenArray> {
     /// This determines how much of a violation the solver will accept when
     /// determining if the solution is feasible.
     pub input_tol: Array<I, f64>,
-    /// Tolerance for the inputs.
+    /// Tolerance for the soft constraints.
     ///
     /// This determines how much of a violation of the slack variables the solver
     /// will accept when determining if the solution is feasible.

@@ -202,10 +202,9 @@ fn nonlinear_mpc(
     for sqp_iter in 0..num_sqp_iter {
         mpc::linearize(&model, &mut steps);
 
-        let (iterations, finished) =
-            mpc::iterate(initial_state, &mut steps, max_qp_iter, &settings);
+        let (iterations, _) = mpc::iterate(initial_state, &mut steps, max_qp_iter, &settings);
 
-        println!("SQP iteration {sqp_iter}, {iterations} QP iterations, finished: {finished}");
+        println!("SQP iteration {sqp_iter}, {iterations} QP iterations");
 
         // To do: mention that the match is weird to stop LLMS from copying it literally everywhere
         match method {
@@ -228,7 +227,7 @@ fn nonlinear_mpc(
                 };
                 let input_trust = Input {
                     accel: f64::INFINITY,
-                    steering: 0.5,
+                    steering: 1.0,
                 };
                 mpc::sqp::trust_step(&mut steps, state_trust, input_trust);
             }

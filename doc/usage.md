@@ -216,19 +216,177 @@ The `idx` argument can be set to anything if the model is not time-dependent.
 
 ## Linear MPC
 
+The simplest kind of MPC is where we linearize the model around some trajectory. If the model is already linear or if the optimum is close to the trajectory used for linearization, then this typically yields very good results while being cheapter to compute than the nonlinear methods.
+
+To start, let's create a straight path to use as the target.
+
+
+```rs
+// Sample time
+let dt = 0.2;
+// Number of samples
+let length = 30;
+
+let mut targets = Vec::new();
+for i in 0..length {
+    let t = i as f64 * dt;
+    targets.push(Target {
+        x: t * 0.3,
+        y: t * 0.4,
+    });
+}
+```
+
+_Note: In practice, you should make sure to sample the path the same speed that you want the robot to follow it, accounting for the time it takes to accelerate._
+
+The state of the solver is stored in the `MpcStep` type. It has a lot of generics, but can be instantiated easily using the `MpcStepForCont` type alias. Each of these steps stores a state and input that is used to linearize around. One option, which we will use here, is to use the path to determine them. We could also for example have linearized every step around the current state.
+
+_Note: We don't actually need the type annotation in this particular case, as the compiler will figure out the type based on the usage later. But it's good to know if you need to store this state somewhere._
+
+```rs
+let mut steps: Vec<MpcStepForCont<Model>> = Vec::new();
+for &target in &targets {
+    let lin_state = State {
+        pos_x: target.x,
+        pos_y: target.y,
+        angle: f64::atan2(0.4, 0.3),
+        vel: f64::hypot(0.4, 0.3),
+    };
+    let lin_input = Input::repeat(0.0);
+
+    steps.push(MpcStep::new(lin_state, lin_input))
+}
+```
+
+Now, we define the model and use the `linearize` function from the `mpc` module to linearize it at each time step. (The linearized version is stored inside the `MpcStep`.)
+
+```rs
+mpc::linearize(&model, &mut steps);
+```
+
+The linear solver can then be invoked by calling `mpc::iterate`, which performs a limited number of QP solver iterations. The `Settings` struct can be used to define what tolerances to use. Here we will use the default settings.
+
+```rs
+let initial_state = State {
+    pos_x: 0.1,
+    pos_y: -0.3,
+    angle: 0.7,
+    vel: 0.1,
+};
+
+let settings = Settings::default();
+let max_iterations = 100;
+
+let (iterations, finished) = mpc::iterate(initial_state, &mut steps, max_iterations, &settings);
+println!("{iterations} iterations, finished: {finished}");
+```
+
+This prints
+
+```
+7 iterations, finished: true
+```
+
+meaning that the solver only needed 7 iterations. If it doesn't finish within the iteration limit, then it will stop at a suboptimal solution. The trajectory found by the solver is stored in the fields `optimal_state` and `optimal_input` for each `MpcStep`.
+
+Note that, as this is uses a linear approximation of the model, the solution won't be exact. The picture below shows the target (gray), trajectory found by the solver (blue), and the path we get if we were to simulate the model with the sequence of inputs it found. As you can see, the simulation drifts away from the optimum.
+
 ![Linear MPC trajectory](figures/figure-1.svg)
+
+This is much less of a problem when running the controller in a closed loop, as the feedback will help it correct for this error as long as the solution is close enough.
+
+When running in a closed loop, it is advantageous to reuse the same `MpcStep`s every time the solver is called, as `mpc::iterate` will use the last solution as the initial guess. This is typically very close when running in a closed loop, which will make the solver converge very quickly under normal circumstances.
 
 ## Nonlinear MPC
 
+To improve the accuracy when working with nonlinear models, RMPC uses sequential quadratic programming. This works by taking the solution from the linear MPC problem and moving the linearization trajectory closer to it. After solving the problem again, this will result in a better solution. If the initial linearization trajectory is close enough then this should converge to the actual optimum.
+
+Because nonlinear models can be unpredictable, there is a risk of divergence if the steps are too large. RMPC has a few different methods for determining how large the steps can be, which are shown in the sections below.
+
 ### Penalty Function
+
+This method works by finding a step size that tries to find a balance between making the solution feasible and making it optimal. This method is very stable, but can be overly cautios for some models due to the Maratos effect. It is used as follows:
+
+```rust
+// repeat some number of times
+for _ in 0..5 {
+    // Linearize around the current trajectory
+    mpc::linearize(&model, &mut steps);
+
+    // Solve the linear MPC problem
+    let (iterations, _) = mpc::iterate(initial_state, &mut steps, max_qp_iter, &settings);
+    println!("SQP iteration {sqp_iter}, {iterations} QP iterations");
+
+    // Move the linearization trajectory closer
+    mpc::sqp::penalty_step(&model, &mut steps, initial_state);
+}
+```
+
+For this particular model, this method only performs slightly better than the linear version because it's too cautious to converge.
 
 ![Penalty function trajectory](figures/figure-2.svg)
 
 ### Filter Method
 
+This method is similar to the penalty function method, but instead of trying to find a specific balance of the objective and feasibility it instead continues as long as it can find a new Pareto optimum. This makes it more aggressive than the penalty function. It is used as follows:
+
+```rust
+let mut filter_history = Vec::new();
+
+// repeat some number of times
+for _ in 0..5 {
+    // Linearize around the current trajectory
+    mpc::linearize(&model, &mut steps);
+
+    // Solve the linear MPC problem
+    let (iterations, _) = mpc::iterate(initial_state, &mut steps, max_qp_iter, &settings);
+    println!("SQP iteration {sqp_iter}, {iterations} QP iterations");
+
+    // Move the linearization trajectory closer, and make sure to add the new point to the history.
+    let point = mpc::sqp::filter_step(&model, &mut steps, initial_state, &filter_history);
+    filter_history.push(point);
+}
+```
+
+This method manages to converge for this model, as seen in the plot below where the yellow and blue paths are directly on top of each other.
+
 ![Filter method trajectory](figures/figure-3.svg)
 
 ### Trust Region
+
+This method, unlike the other two, tries to take a full step every time, with a limit to how large the step is. It is used as follows:
+
+```rust
+let state_trust = State {
+    pos_x: f64::INFINITY,
+    pos_y: f64::INFINITY,
+    angle: 0.5,
+    vel: 0.5,
+};
+let input_trust = Input {
+    accel: f64::INFINITY,
+    steering: 1.0,
+};
+
+// repeat some number of times
+for _ in 0..5 {
+    // Linearize around the current trajectory
+    mpc::linearize(&model, &mut steps);
+
+    // Solve the linear MPC problem
+    let (iterations, _) = mpc::iterate(initial_state, &mut steps, max_qp_iter, &settings);
+    println!("SQP iteration {sqp_iter}, {iterations} QP iterations");
+
+    // Move the linearization trajectory closer
+    mpc::sqp::trust_step(&mut steps, state_trust, input_trust);
+}
+```
+
+`state_trust` and `input_trust` are the limits for how big the step can be. In the code above, this limit is set so that the `angle` and `vel` states can change by at most `0.5`, and the `steering` input by at most `1.0`. The rest of the components are set to `f64::INFINITY` to make them unrestricted. Making them unrestricted is fine in this case as all of the expressions in the model that use them are linear, so they don't affect the linearization anyways.
+
+For some models, it could be fine to use `f64::INFINITY` for all fields, but for others you might need to tune these limits to get a good result. In general, smaller limits will make the solver more stable and larger limits will make it faster.
+
+This method converges to the right solution for this model, as shown below.
 
 ![Trust region trajectory](figures/figure-4.svg)
 
