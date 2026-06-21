@@ -28,15 +28,15 @@ struct Input<T> {
     steering: T,
 }
 
+#[derive(Clone)]
+struct Model {
+    targets: Vec<Target>,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Target {
     x: f64,
     y: f64,
-}
-
-#[derive(Clone)]
-struct Model {
-    targets: Vec<Target>,
 }
 
 impl Continuous for Model {

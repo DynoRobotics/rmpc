@@ -124,7 +124,7 @@ pub type MpcStepForCont<T> = MpcStep<
 >;
 
 impl<S: GenArray, I: GenArray, C: GenArray, B: GenArray> MpcStep<S, I, C, B> {
-    /// Creates an instance of [`RiccatiStep`] with all matrices set to zero.
+    /// Creates an instance of [`MpcStep`] with all matrices set to zero.
     pub const fn new(linearized_state: Array<S, f64>, linearized_input: Array<I, f64>) -> Self {
         Self {
             linearized_state,
