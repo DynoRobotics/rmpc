@@ -1,10 +1,12 @@
 # Basic Usage
 
-As this is a Rust crate, the documentation can be generated with the following command
+As this is a Rust crate, the documentation can be generated with the following command:
 
 ```bash
 cargo doc --open
 ```
+
+(The `--open` flag opens it in the default browser)
 
 ## Model Definition
 
@@ -23,7 +25,7 @@ struct State<T> {
 
 It has a field for each quantity that we want to track. Note that this struct is generic. This is because we will use it with many different field types later on.
 
-To let the library handle this generic type properly, it derives the `GenArray` trait, which lets the library instantiate it with different types and treat it as an array. The derive macro requires that all fields have type `T` and that the struct is annotated with `#[repr(C)]`. See the documentation for `rmpc::array` for more information.
+To let the library handle this generic type properly, it derives the `GenArray` trait, which lets the library instantiate it with different types, and lets it treat it as an array. The derive macro requires that all fields have type `T` and that the struct is annotated with `#[repr(C)]`. See the documentation for `rmpc::array` for more information.
 
 Similarly, we define a struct for the "input" used to control the system:
 
@@ -38,7 +40,7 @@ struct Input<T> {
 
 It also derives `GenArray` for the same reason as for the state.
 
-With this we can define the actual model of the system. The parameters to the model are stored in a struct, which we will call `Model`, that implements the `Continuous` trait. This trait is used for al continuous-time models.
+With this we can define the actual model of the system. The parameters to the model are stored in a struct, which we will call `Model`, that implements the `Continuous` trait.
 
 ```rs
 #[derive(Clone)]
@@ -51,7 +53,7 @@ impl Continuous for Model {
 }
 ```
 
-There are a few things we need to provide in this implementation. The first is the type of involved quantities. These are:
+There are a few things we need to provide in this implementation. The first are the types of involved quantities. These are:
 
 - `State`: The state of the system, set to the `State<()>` struct we defined earlier.
 - `Input`: The input of the system, set to the `Input<()>` struct we defined earlier.
@@ -69,7 +71,9 @@ impl Continuous for Model {
 }
 ```
 
-These types can be anything that implements the `GenArray` trait, which is either a struct that derives it or a built in array. The unit type `()` is used as a placeholder for the generic.
+These types can be anything that implements the `GenArray` trait, which is either a struct that derives it or an actual array (`[(); N]`). The unit type `()` is used as a placeholder for the generic.
+
+_Note: If you used an IDE to autocomplete the required methods in the trait, you will likely see a lot of types like `Array<Self::State, Dual<D>>`. This is just a type alias for `State<Dual<D>>`._
 
 Now, for the dynamics of the system. As this is a continuous time model, we describe the dynamics as a differential equation where the derivative of the state is a function of the state and input. For this vehicle example, it looks like
 
@@ -99,9 +103,7 @@ The type `Dual<D>` is used for the solver to be able to track derivatives using 
 
 For time-dependent models, the `time` argument can be used to get the current point in time as a float. `idx` and `dt` are the index of the step and the delta time, respectively. The dynamics of this model are not time-dependent, so we ignore them with `_`.
 
-_Note: As the RK4 method calls the method on points in time between time steps, `time == idx * dt` doesn't always hold._
-
-For this model, we will use the distance to a reference trajectory as the cost function, so we will add a field `targets` to `Model` that stores this
+For this model, we will use the distance to a reference trajectory as the cost function, so we will add a field `targets` to `Model` that stores this trajectory.
 
 ```rs
 #[derive(Clone)]
@@ -151,9 +153,9 @@ which means that the actual cost function becomes:
 + (0.2 * input.steering)**2
 ```
 
-_**Warning:** The solver assumes that the derivatives of the cost vector with respect to the different inputs are always linearly independent (or equivalently, the Jacobian with respect to the inputs is a tall matrix with full rank). If this assumption is violated then the solver is likely to produce nonsensical results. Having an component with a scaled version for each input is a sufficient condition._
+_**Warning:** The solver assumes that the derivatives of the cost vector with respect to the different inputs are always linearly independent (or equivalently, the Jacobian with respect to the inputs is a tall matrix with full rank). If this assumption is violated then the solver is likely to produce nonsensical results. The easiest way to make sure this is satsified is by having a component for each input that is just the input scaled by a constant non-zero value._
 
-Finally, we have the constraints for the system. They are given by two parts. The first is the hard constraints for the input signals, defined as an interval for each input:
+Finally, we have the constraints for the system. There are two types of constraints. The first is the hard constraints for the input signals, defined as an interval for each input. So for the constraints `-2.0 <= accel <= 0.5` and `-1.0 <= steering <= 1.0` we have:
 
 ```rs
 impl Continuous for Model {
@@ -170,7 +172,9 @@ impl Continuous for Model {
 }
 ```
 
-The second part is the soft constraints. We will skip them for now, so we implement that method by returning an empty array:
+The bounds can be set to `-f64::INFINITY` (for the lower bound) or `f64::INFINITY` (for the upper bound) to disable the constraints
+
+The second type of constraints is the soft constraints. We will skip them for now, so we implement that method by returning an empty array:
 
 ```rs
 impl Continuous for Model {
@@ -235,6 +239,8 @@ for i in 0..length {
         y: t * 0.4,
     });
 }
+
+let model = Model { targets }.discretize(dt);
 ```
 
 _Note: In practice, you should make sure to sample the path the same speed that you want the robot to follow it, accounting for the time it takes to accelerate._
@@ -245,7 +251,7 @@ _Note: We don't actually need the type annotation in this particular case, as th
 
 ```rs
 let mut steps: Vec<MpcStepForCont<Model>> = Vec::new();
-for &target in &targets {
+for &target in &model.model.targets {
     let lin_state = State {
         pos_x: target.x,
         pos_y: target.y,
@@ -258,13 +264,13 @@ for &target in &targets {
 }
 ```
 
-Now, we define the model and use the `linearize` function from the `mpc` module to linearize it at each time step. (The linearized version is stored inside the `MpcStep`.)
+Now, we define the model and use the `linearize` function from the `mpc` module to linearize it at each time step. (The linearized versions are stored inside the `MpcStep`s.)
 
 ```rs
 mpc::linearize(&model, &mut steps);
 ```
 
-The linear solver can then be invoked by calling `mpc::iterate`, which performs a limited number of QP solver iterations. The `Settings` struct can be used to define what tolerances to use. Here we will use the default settings.
+The solver can then be invoked by calling `mpc::iterate`, which performs a limited number of QP solver iterations. The `Settings` struct can be used to define what tolerances to use. Here we will use the default settings.
 
 ```rs
 let initial_state = State {
@@ -289,7 +295,7 @@ This prints
 
 meaning that the solver only needed 7 iterations. If it doesn't finish within the iteration limit, then it will stop at a suboptimal solution. The trajectory found by the solver is stored in the fields `optimal_state` and `optimal_input` for each `MpcStep`.
 
-Note that, as this is uses a linear approximation of the model, the solution won't be exact. The picture below shows the target (gray), trajectory found by the solver (blue), and the path we get if we were to simulate the model with the sequence of inputs it found. As you can see, the simulation drifts away from the optimum.
+Note that, as this is uses a linear approximation of the model, the solution won't be exact. The picture below shows the target (gray), trajectory found by the solver (blue), and the path we get if we were to simulate the model with the sequence of inputs it found. As you can see, the simulation drifts away from the solution.
 
 ![Linear MPC trajectory](figures/figure-1.svg)
 
@@ -301,7 +307,7 @@ When running in a closed loop, it is advantageous to reuse the same `MpcStep`s e
 
 To improve the accuracy when working with nonlinear models, RMPC uses sequential quadratic programming. This works by taking the solution from the linear MPC problem and moving the linearization trajectory closer to it. After solving the problem again, this will result in a better solution. If the initial linearization trajectory is close enough then this should converge to the actual optimum.
 
-Because nonlinear models can be unpredictable, there is a risk of divergence if the steps are too large. RMPC has a few different methods for determining how large the steps can be, which are shown in the sections below.
+Because nonlinear models can be unpredictable, there is a risk of divergence if the steps are too large. RMPC has a few different methods for determining the step size to use. They are described in the sections below.
 
 ### Penalty Function
 
@@ -322,7 +328,7 @@ for _ in 0..5 {
 }
 ```
 
-For this particular model, this method only performs slightly better than the linear version because it's too cautious to converge.
+For this particular model, this method only performs slightly better than the linear version because it's too cautious to converge to the actual optimum.
 
 ![Penalty function trajectory](figures/figure-2.svg)
 
@@ -348,13 +354,13 @@ for _ in 0..5 {
 }
 ```
 
-This method manages to converge for this model, as seen in the plot below where the yellow and blue paths are directly on top of each other.
+This method manages to converge to the actual optimum for this model, as seen in the plot below where the yellow and blue paths are directly on top of each other.
 
 ![Filter method trajectory](figures/figure-3.svg)
 
 ### Trust Region
 
-This method, unlike the other two, tries to take a full step every time, with a limit to how large the step is. It is used as follows:
+This method, unlike the other two, tries to take a full step every time. To avoid taking too large steps it with a limit to how large the step is. It is used as follows:
 
 ```rust
 let state_trust = State {
@@ -382,7 +388,7 @@ for _ in 0..5 {
 }
 ```
 
-`state_trust` and `input_trust` are the limits for how big the step can be. In the code above, this limit is set so that the `angle` and `vel` states can change by at most `0.5`, and the `steering` input by at most `1.0`. The rest of the components are set to `f64::INFINITY` to make them unrestricted. Making them unrestricted is fine in this case as all of the expressions in the model that use them are linear, so they don't affect the linearization anyways.
+`state_trust` and `input_trust` are the limits for how big the step can be. In the code above, this limit is set so that the `angle` and `vel` states can change by at most `0.5` per step, and the `steering` input by at most `1.0` per step. The rest of the components are set to `f64::INFINITY` to make them unrestricted. Making them unrestricted is fine in this case as all of the expressions in the model that use them are linear, so they don't affect the linearization anyways.
 
 For some models, it could be fine to use `f64::INFINITY` for all fields, but for others you might need to tune these limits to get a good result. In general, smaller limits will make the solver more stable and larger limits will make it faster.
 
@@ -396,7 +402,7 @@ The sections below list some more things that can be done in the model definitio
 
 ### Soft Constraints
 
-Soft constraints are constraints where the solution is allowed to violate them, but at some cost. Unlike the hard input constraints, the soft constraints can be used on arbitrary functions of the states and inputs.
+Soft constraints are constraints where the solution is allowed to violate them, but at some cost. Unlike the hard input constraints, the soft constraints can be used to constrain arbitrary functions of the states and inputs.
 
 As a simple example, let's say we want to limit the velocity of the vehicle from the example before. First, we change the `Bounds` type to an array with a single item, as we only want to add a single constraint.
 
@@ -434,7 +440,7 @@ The weight is used to determine how costly a violation is. This bound, for examp
 + (10 * max(0.0, 0.0 - state.velocity))**2 // cost when below 0.0
 ```
 
-Note that we are not limited to a single state. We could have used an arbitrary expression instead of `state.velocity`. The bounds and weight however is not allowed to depend on the state or input, and the types of the variables enforces this.
+Note that we are not limited to a single state. We could have used an arbitrary expression instead of `state.velocity`. The bounds and weight however are not allowed to depend on the state or input, and the types of the variables enforces this.
 
 ### Discrete Models and Derivatives
 

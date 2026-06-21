@@ -111,8 +111,10 @@ fn main() -> std::io::Result<()> {
         });
     }
 
+    let model = Model { targets }.discretize(dt);
+
     let mut steps: Vec<MpcStepForCont<Model>> = Vec::new();
-    for &target in &targets {
+    for &target in &model.model.targets {
         let lin_state = State {
             pos_x: target.x,
             pos_y: target.y,
@@ -123,8 +125,6 @@ fn main() -> std::io::Result<()> {
 
         steps.push(MpcStep::new(lin_state, lin_input))
     }
-
-    let model = Model { targets }.discretize(dt);
 
     let initial_state = State {
         pos_x: 0.1,

@@ -10,7 +10,7 @@
 #import "@preview/lilaq:0.6.0" as lq
 
 #set page(width: auto, height: auto, margin: 0.5em)
-#show: lq.set-diagram(width: 7cm, height: 5cm)
+#show: lq.set-diagram(width: 10cm, height: 7cm)
 
 #let mpc-plot(name, title) = {
   let data = csv(name + ".csv", row-type: dictionary)
