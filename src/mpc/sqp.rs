@@ -35,14 +35,35 @@ pub fn trust_step<S: GenArray, I: GenArray, C: GenArray, B: GenArray>(
     perform_step(steps, step_size);
 }
 
+/// A pareto optimum found by `filter_step`.
+#[derive(Clone, Copy, Debug)]
+pub struct FilterPoint {
+    cost: Float,
+    violation: Float,
+}
+
+impl FilterPoint {
+    /// `true` if `self` is strictly better than `other`.
+    fn dominates(&self, other: &Self) -> bool {
+        self.cost < other.cost && self.violation < other.violation
+    }
+}
+
 /// Moves the trajectory used for linearization towards the optimum found by the
-/// QP solver, using a Markov Filter (<https://doi.org/10.1023/A:1020533003783>)
-/// to determine an appropriate step size.
+/// QP solver, using a filter method to determine an appropriate step size.
+///
+/// This returns a [`FilterPoint`] representing the current progress of the SQP
+/// solver. To decrease the risk of losing progress, the points found by
+/// previous SQP iterations can be provided in `previous`.
+///
+/// If `previous` is always empty, then this becomes a Markov Filter
+/// (<https://doi.org/10.1023/A:1020533003783>).
 pub fn filter_step<M: Discrete>(
     model: &M,
     steps: &mut [MpcStepFor<M>],
     initial_state: Array<M::State, f64>,
-) {
+    previous: &[FilterPoint],
+) -> FilterPoint {
     let (current, deriv) = differentiate(vector([Float::ZERO]), |[step_size]| {
         let (cost, violation) = cost_violation(model, steps, step_size, initial_state);
         [cost, violation]
@@ -51,30 +72,41 @@ pub fn filter_step<M: Discrete>(
     // If the direction is an ascent direction then there is no appropriate step
     // length.
     if deriv.into_array().iter().all(|&d| d > 0.0) {
-        return;
+        let [cost, violation] = current.into_array();
+        return FilterPoint { cost, violation };
     }
 
     let mut step_size = Float::from(1.0);
-    loop {
+
+    let point = loop {
         let actual = {
             let (cost, violation) =
                 cost_violation::<_, Zero>(model, steps, step_size.into(), initial_state);
-            [cost, violation].map(Dual::float_value)
+            FilterPoint {
+                cost: cost.float_value(),
+                violation: violation.float_value(),
+            }
         };
-        let goal = current + step_size * deriv * Float::from(0.5);
 
-        if zip(actual.iter(), goal.into_array().iter()).any(|(&a, &g)| a < g) {
-            break;
+        let goal = (current + step_size * deriv * Float::from(0.5)).into_array();
+        let goal = FilterPoint {
+            cost: goal[0],
+            violation: goal[1],
+        };
+
+        if !goal.dominates(&actual) && !previous.iter().any(|p| p.dominates(&actual)) {
+            break actual;
         }
 
         step_size *= 0.5;
 
         if step_size < MIN_STEP {
-            break;
+            break actual;
         }
-    }
+    };
 
     perform_step(steps, step_size);
+    point
 }
 
 /// Moves the trajectory used for linearization towards the optimum found by the
