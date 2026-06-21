@@ -99,7 +99,7 @@ The type `Dual<D>` is used for the solver to be able to track derivatives using 
 
 For time-dependent models, the `time` argument can be used to get the current point in time as a float. `idx` and `dt` are the index of the step and the delta time, respectively. The dynamics of this model are not time-dependent, so we ignore them with `_`.
 
-_Note: As the RK4 method calls the function on points in time between time steps, `time == idx * dt` doesn't always hold._
+_Note: As the RK4 method calls the method on points in time between time steps, `time == idx * dt` doesn't always hold._
 
 For this model, we will use the distance to a reference trajectory as the cost function, so we will add a field `targets` to `Model` that stores this
 
@@ -170,7 +170,7 @@ impl Continuous for Model {
 }
 ```
 
-The second part is the soft constraints. We will skip them for now, so we implement that function by returning an empty array:
+The second part is the soft constraints. We will skip them for now, so we implement that method by returning an empty array:
 
 ```rs
 impl Continuous for Model {
@@ -392,10 +392,52 @@ This method converges to the right solution for this model, as shown below.
 
 ## Advanced Models
 
+The sections below list some more things that can be done in the model definitions.
+
 ### Soft Constraints
 
-### Discrete Models
+Soft constraints are constraints where the solution is allowed to violate them, but at some cost. Unlike the hard input constraints, the soft constraints can be used on arbitrary functions of the states and inputs.
 
-### Discrete states
+As a simple example, let's say we want to limit the velocity of the vehicle from the example before. First, we change the `Bounds` type to an array with a single item, as we only want to add a single constraint.
 
-### Derivatives of States and Inputs
+```rs
+impl Continuous for Model {
+    type Bounds = [(); 1];
+
+    /* ... */
+}
+```
+
+Then, we change the `bounds` method to add a constraint for `state.velocity` with a range from `0.0 <= state.velocity <= 2.0` and a weight of `10.0`.
+
+```rs
+impl Continuous for Model {
+    /* ... */
+
+    fn bounds<D: Linear>(
+        &self,
+        _time: f64, _idx: usize, _dt: f64,
+        state: State<Dual<D>>,
+        _input: Input<Dual<D>>,
+    ) -> [Bounded<D>; 1] {
+        [
+            Bounded::new(state.velocity, 0.0..2.0, 10.0),
+        ]
+    }
+}
+```
+
+The weight is used to determine how costly a violation is. This bound, for example, will result in the following extra cost:
+
+```rust
+(10 * max(0.0, state.velocity - 2.0))**2   // cost when above 2.0
++ (10 * max(0.0, 0.0 - state.velocity))**2 // cost when below 0.0
+```
+
+Note that we are not limited to a single state. We could have used an arbitrary expression instead of `state.velocity`. The bounds and weight however is not allowed to depend on the state or input, and the types of the variables enforces this.
+
+### Discrete Models and Derivatives
+
+In some cases it is easier to describe the system using a discrete-time model. In those cases it can be more convenient to implement the `Discrete` trait instead. It is similar to `Continuous` except that the `update` method returns the next state instead of the state derivative, and all of the methods only take a single `time: usize` argument instead of the three different time arguments used by `Continuous`. It also doesn't need to be discretized as it is already discrete.
+
+It is also possible to have a mix of continuous and non-continuous states in a model. See the documentation for `Continuous::IS_DISCRETE` for details on how to use it, including an example for how to use it to compute a derivative.

@@ -1,6 +1,8 @@
 //! Document for rendering the plots in the usage guide.
 //!
-//! To render the plots, navigate to this directory and run the command
+//! To render the plots:
+//! 1. Run the `usage-guide` example to generate the data files
+//! 2. Navigate to this directory and run the following command to generate the svgs
 //! ```
 //! typst compile --format svg plots.typ figure-{p}.svg
 //! ```
