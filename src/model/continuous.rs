@@ -207,6 +207,7 @@ impl<M: Continuous> Continuous for &M {
 /// approximate the discrete solution assuming a zero order hold input.
 ///
 /// [RK4]: https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods#The_Runge%E2%80%93Kutta_method
+#[derive(Clone, Debug)]
 pub struct RungeKutta4<M> {
     /// The continuous time model.
     pub model: M,
