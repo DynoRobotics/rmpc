@@ -1,6 +1,8 @@
 # rmpc
 
-_To do: Write a proper readme_
+A library for model predictive control using a structure exploiting active-set method with support for low-rank updates.
+
+See [doc/usage.md](doc/usage.md) for basic usage.
 
 ## 32-bit floats
 
